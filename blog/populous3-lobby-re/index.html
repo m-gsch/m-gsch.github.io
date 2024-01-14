@@ -1,0 +1,840 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+<meta content="IE=edge" http-equiv="X-UA-Compatible" />
+<meta content="text/html; charset=UTF-8" http-equiv="content-type" />
+<meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no" />
+<meta name="robots" content="index, follow">
+
+
+
+
+
+
+
+
+
+
+<title>Reverse engineering Populous: The Beginning&#x27;s lobby networking</title>
+
+
+
+<meta name="title" content="Reverse engineering Populous: The Beginning&#x27;s lobby networking">
+
+
+
+<meta property="og:type" content="website">
+<meta property="og:url" content="https://guas.ch/blog/populous3-lobby-re/">
+
+<meta property="og:site_name" content="">
+
+
+<meta property="og:title" content="Reverse engineering Populous: The Beginning&#x27;s lobby networking">
+
+
+
+
+
+<meta property="twitter:card" content="summary_large_image">
+<meta property="twitter:url" content="https://guas.ch/blog/populous3-lobby-re/">
+
+<meta property="twitter:title" content="Reverse engineering Populous: The Beginning&#x27;s lobby networking">
+
+
+
+
+<link rel="canonical" href="https://guas.ch/blog/populous3-lobby-re/">
+
+
+
+
+<link rel="alternate" type="application/atom+xml" title="RSS" href="https://guas.ch/atom.xml"> 
+
+
+
+<link rel="stylesheet" href="https://guas.ch/css/style.css" />
+
+<script defer>
+    const setTheme = (theme) => {
+        document.documentElement.className = theme;
+        localStorage.setItem('theme', theme);
+    }
+
+    const hasCodeRun = localStorage.getItem('hasCodeRun');
+
+    if (!hasCodeRun) {
+        const defaultTheme = "light";
+        setTheme(defaultTheme);
+        localStorage.setItem('hasCodeRun', 'true');
+    }
+
+    const getTheme = () => {
+        const theme = localStorage.getItem('theme');
+        if (theme) {
+            setTheme(theme);
+        }
+    }
+
+    getTheme();
+
+</script>
+</head>
+<body>
+    <div class="wrapper">
+      <header>
+          
+
+  
+
+
+  <nav class="navBar">
+    
+      <a href="&#x2F;" class="">
+        
+        &#x2F;whoami&#x2F;
+      </a>
+    
+      <a href="&#x2F;blog" class="">
+        
+        &#x2F;blog&#x2F;
+      </a>
+    
+
+  <div class="themeSwitch">
+    
+    <button class="themeButton light" onclick="setTheme('light')" title="Light mode"><svg class="icons icons__background"> <use href="https://guas.ch/icons.svg#lightMode"></use></svg></button>
+    <button class="themeButton dark" onclick="setTheme('dark')" title="Dark mode"><svg class="icons icons__background"><use href="https://guas.ch/icons.svg#darkMode"></use></svg></button>
+
+    
+  </div>
+</nav>
+
+
+      </header>
+      <main>
+          
+<div><a href="..">..</a>/<span class="metaData">populous3-lobby-re</span></div>
+<time datetime="2024-01-14">Published on: <span class="metaData">2024-01-14</span></time>
+
+<h1>Reverse engineering Populous: The Beginning&#x27;s lobby networking</h1>
+
+
+
+<p><a href="https://en.wikipedia.org/wiki/Populous:_The_Beginning">Populous: The Beginning</a> is a PC game from 1998 I used to play when I was young so as a fun side project I decided to reverse engineer the network protocol used in the lobby and find some vulnerabilities in it. As a side note, all of this research happened more than 2 years ago but I finally decided to organize it.</p>
+<p>It's an old game with the expectation of playing multiplayer in a LAN environment so there's not really a server and a player is selected as the host and takes the lobby management role. The game's lobby-related functionality is very basic, you select a lobby, called a session, to join from a list and, once you are in, there's basic information about other players, a chat and some game-related configuration options.</p>
+<div class="textCenter">
+  <a class="lightbox" href="img&#x2F;populous3_lobby.png">
+    <img src="img&#x2F;populous3_lobby.png" >
+  </a>
+  
+</div><h2 id="reconnaissance-and-analysis">Reconnaissance and analysis</h2>
+<p>My first step was getting the game from <a href="https://www.gog.com/">GOG</a> for like 2€. Then I opened any executable file that seemed interesting in <a href="https://hex-rays.com/">IDA</a> until I found <em>WEANETR.dll</em> which is responsible for all the networking-related functionality.</p>
+<p>After opening the DLL in IDA I skimmed the code and quickly noticed there were calls to a logging function which was not part of the release. To get a better idea of the functionality in a dynamic way I wrote a <a href="https://frida.re/">Frida</a> script to hook those logging calls and the <em>sendto/recvfrom</em> functions.</p>
+<pre data-lang="javascript" style="background-color:#2b303b;color:#c0c5ce;" class="language-javascript "><code class="language-javascript" data-lang="javascript"><span style="color:#b48ead;">var </span><span style="color:#bf616a;">baseAddr </span><span>= </span><span style="color:#bf616a;">Module</span><span>.</span><span style="color:#8fa1b3;">findBaseAddress</span><span>(&#39;</span><span style="color:#a3be8c;">WEANETR.dll</span><span>&#39;);
+</span><span style="color:#ebcb8b;">console</span><span>.</span><span style="color:#96b5b4;">log</span><span>(&#39;</span><span style="color:#a3be8c;">WEANETR.dll baseAddr: </span><span>&#39; + </span><span style="color:#bf616a;">baseAddr</span><span>);
+</span><span>
+</span><span style="color:#b48ead;">var </span><span style="color:#bf616a;">log_null_sub_3 </span><span>= </span><span style="color:#8fa1b3;">resolveAddress</span><span>(&#39;</span><span style="color:#a3be8c;">0x10001020</span><span>&#39;);
+</span><span>
+</span><span style="color:#bf616a;">Interceptor</span><span>.</span><span style="color:#8fa1b3;">attach</span><span>(</span><span style="color:#bf616a;">log_null_sub_3</span><span>, {
+</span><span style="color:#8fa1b3;">onEnter</span><span>: </span><span style="color:#b48ead;">function </span><span>(</span><span style="color:#bf616a;">args</span><span>) {
+</span><span style="color:#b48ead;">var </span><span style="color:#bf616a;">args_0 </span><span>= </span><span style="color:#bf616a;">args</span><span>[</span><span style="color:#d08770;">0</span><span>].</span><span style="color:#8fa1b3;">readCString</span><span>();
+</span><span style="color:#b48ead;">var </span><span style="color:#bf616a;">split_args </span><span>= </span><span style="color:#bf616a;">args_0</span><span>.</span><span style="color:#96b5b4;">split</span><span>(&#39;</span><span style="color:#a3be8c;">%</span><span>&#39;);
+</span><span style="color:#b48ead;">var </span><span style="color:#bf616a;">print_string </span><span>= </span><span style="color:#bf616a;">split_args</span><span>[</span><span style="color:#d08770;">0</span><span>];
+</span><span style="color:#b48ead;">for </span><span>(</span><span style="color:#b48ead;">var </span><span style="color:#bf616a;">i </span><span>= </span><span style="color:#d08770;">1</span><span>; </span><span style="color:#bf616a;">i </span><span>&lt; </span><span style="color:#bf616a;">split_args</span><span>.length; </span><span style="color:#bf616a;">i</span><span>++) {
+</span><span>    </span><span style="color:#b48ead;">switch </span><span>(</span><span style="color:#bf616a;">split_args</span><span>[</span><span style="color:#bf616a;">i</span><span>][</span><span style="color:#d08770;">0</span><span>]) {
+</span><span>        </span><span style="color:#b48ead;">case </span><span>&#39;</span><span style="color:#a3be8c;">s</span><span>&#39;:
+</span><span>            </span><span style="color:#bf616a;">print_string </span><span>+= </span><span style="color:#bf616a;">args</span><span>[</span><span style="color:#bf616a;">i</span><span>].</span><span style="color:#8fa1b3;">readCString</span><span>() + </span><span style="color:#bf616a;">split_args</span><span>[</span><span style="color:#bf616a;">i</span><span>].</span><span style="color:#96b5b4;">substring</span><span>(</span><span style="color:#d08770;">1</span><span>);
+</span><span>            </span><span style="color:#b48ead;">break</span><span>;
+</span><span>        </span><span style="color:#b48ead;">case </span><span>&#39;</span><span style="color:#a3be8c;">d</span><span>&#39;:
+</span><span>            </span><span style="color:#bf616a;">print_string </span><span>+= </span><span style="color:#bf616a;">args</span><span>[</span><span style="color:#bf616a;">i</span><span>].</span><span style="color:#8fa1b3;">toInt32</span><span>() + </span><span style="color:#bf616a;">split_args</span><span>[</span><span style="color:#bf616a;">i</span><span>].</span><span style="color:#96b5b4;">substring</span><span>(</span><span style="color:#d08770;">1</span><span>);
+</span><span>            </span><span style="color:#b48ead;">break</span><span>;
+</span><span>        </span><span style="color:#b48ead;">default</span><span>:
+</span><span>            </span><span style="color:#bf616a;">print_string </span><span>+= &#39;</span><span style="color:#a3be8c;">[Unknown format]</span><span>&#39; + </span><span style="color:#bf616a;">args</span><span>[</span><span style="color:#bf616a;">i</span><span>] + </span><span style="color:#bf616a;">split_args</span><span>[</span><span style="color:#bf616a;">i</span><span>].</span><span style="color:#96b5b4;">substring</span><span>(</span><span style="color:#d08770;">1</span><span>);
+</span><span>    }
+</span><span>}
+</span><span style="color:#ebcb8b;">console</span><span>.</span><span style="color:#96b5b4;">log</span><span>(&#39;</span><span style="color:#a3be8c;">[+] Log: </span><span>&#39; + </span><span style="color:#bf616a;">print_string</span><span>.</span><span style="color:#8fa1b3;">trim</span><span>());
+</span><span>},
+</span><span>});
+</span><span>
+</span><span style="color:#b48ead;">var </span><span style="color:#bf616a;">sendto_wrapper </span><span>= </span><span style="color:#8fa1b3;">resolveAddress</span><span>(&#39;</span><span style="color:#a3be8c;">0x10010850</span><span>&#39;);
+</span><span style="color:#b48ead;">var </span><span style="color:#bf616a;">recvfrom_wrapper </span><span>= </span><span style="color:#8fa1b3;">resolveAddress</span><span>(&#39;</span><span style="color:#a3be8c;">0x100108B0</span><span>&#39;);
+</span><span>
+</span><span style="color:#bf616a;">Interceptor</span><span>.</span><span style="color:#8fa1b3;">attach</span><span>(</span><span style="color:#bf616a;">sendto_wrapper</span><span>, {
+</span><span>    </span><span style="color:#8fa1b3;">onEnter</span><span>: </span><span style="color:#b48ead;">function </span><span>(</span><span style="color:#bf616a;">args</span><span>) {
+</span><span>        </span><span style="color:#b48ead;">var </span><span style="color:#bf616a;">local_port </span><span>= </span><span style="color:#8fa1b3;">swap16</span><span>(</span><span style="color:#8fa1b3;">ptr</span><span>(</span><span style="color:#bf616a;">args</span><span>[</span><span style="color:#d08770;">0</span><span>]).</span><span style="color:#8fa1b3;">readU16</span><span>());
+</span><span>        </span><span style="color:#b48ead;">var </span><span style="color:#bf616a;">to_port </span><span>= </span><span style="color:#8fa1b3;">swap16</span><span>(</span><span style="color:#8fa1b3;">ptr</span><span>(</span><span style="color:#bf616a;">args</span><span>[</span><span style="color:#d08770;">1</span><span>]).</span><span style="color:#8fa1b3;">readU16</span><span>());
+</span><span>        </span><span style="color:#b48ead;">var </span><span style="color:#bf616a;">to_ip_string </span><span>= </span><span style="color:#8fa1b3;">int2ip</span><span>(</span><span style="color:#8fa1b3;">swap32</span><span>(</span><span style="color:#8fa1b3;">ptr</span><span>(</span><span style="color:#bf616a;">args</span><span>[</span><span style="color:#d08770;">1</span><span>]).</span><span style="color:#96b5b4;">add</span><span>(</span><span style="color:#d08770;">6</span><span>).</span><span style="color:#8fa1b3;">readU32</span><span>()));
+</span><span>        </span><span style="color:#ebcb8b;">console</span><span>.</span><span style="color:#96b5b4;">log</span><span>(&#39;</span><span style="color:#a3be8c;">[+] Sent: </span><span>&#39; + </span><span style="color:#bf616a;">local_port </span><span>+ &#39;</span><span style="color:#a3be8c;"> --&gt; </span><span>&#39; + </span><span style="color:#bf616a;">to_ip_string </span><span>+ &#39;</span><span style="color:#a3be8c;">:</span><span>&#39; + </span><span style="color:#bf616a;">to_port</span><span>)
+</span><span>        </span><span style="color:#ebcb8b;">console</span><span>.</span><span style="color:#96b5b4;">log</span><span>(&#39;</span><span style="color:#a3be8c;">[+] Return: </span><span>&#39; + </span><span style="color:#bf616a;">this</span><span>.</span><span style="color:#bf616a;">returnAddress </span><span>+ &#39;</span><span style="color:#a3be8c;"> ThreadId: </span><span>&#39; + </span><span style="color:#bf616a;">this</span><span>.</span><span style="color:#bf616a;">threadId</span><span>);
+</span><span>        </span><span style="color:#ebcb8b;">console</span><span>.</span><span style="color:#96b5b4;">log</span><span>(</span><span style="color:#8fa1b3;">hexdump</span><span>(</span><span style="color:#8fa1b3;">ptr</span><span>(</span><span style="color:#bf616a;">args</span><span>[</span><span style="color:#d08770;">2</span><span>]), {
+</span><span>            offset: </span><span style="color:#d08770;">0</span><span>,
+</span><span>            length: </span><span style="color:#bf616a;">args</span><span>[</span><span style="color:#d08770;">3</span><span>].</span><span style="color:#8fa1b3;">toInt32</span><span>(),
+</span><span>            header: </span><span style="color:#d08770;">true</span><span>,
+</span><span>            ansi: </span><span style="color:#d08770;">true
+</span><span>        }));
+</span><span>    },
+</span><span>
+</span><span>});
+</span><span>
+</span><span style="color:#bf616a;">Interceptor</span><span>.</span><span style="color:#8fa1b3;">attach</span><span>(</span><span style="color:#bf616a;">recvfrom_wrapper</span><span>, { 
+</span><span>    </span><span style="color:#8fa1b3;">onEnter</span><span>: </span><span style="color:#b48ead;">function </span><span>(</span><span style="color:#bf616a;">args</span><span>) {
+</span><span>        </span><span style="color:#bf616a;">this</span><span>.</span><span style="color:#bf616a;">recvbuf </span><span>= </span><span style="color:#8fa1b3;">ptr</span><span>(</span><span style="color:#bf616a;">args</span><span>[</span><span style="color:#d08770;">0</span><span>]);
+</span><span>        </span><span style="color:#bf616a;">this</span><span>.</span><span style="color:#bf616a;">sock_obj </span><span>= </span><span style="color:#8fa1b3;">ptr</span><span>(</span><span style="color:#bf616a;">args</span><span>[</span><span style="color:#d08770;">2</span><span>])
+</span><span>        </span><span style="color:#bf616a;">this</span><span>.</span><span style="color:#bf616a;">from_obj </span><span>= </span><span style="color:#8fa1b3;">ptr</span><span>(</span><span style="color:#bf616a;">args</span><span>[</span><span style="color:#d08770;">3</span><span>]);
+</span><span>    },
+</span><span>    </span><span style="color:#8fa1b3;">onLeave</span><span>: </span><span style="color:#b48ead;">function </span><span>(</span><span style="color:#bf616a;">retval</span><span>) {
+</span><span>        </span><span style="color:#b48ead;">var </span><span style="color:#bf616a;">from_port </span><span>= </span><span style="color:#8fa1b3;">swap16</span><span>(</span><span style="color:#bf616a;">this</span><span>.</span><span style="color:#bf616a;">from_obj</span><span>.</span><span style="color:#8fa1b3;">readU16</span><span>());
+</span><span>        </span><span style="color:#b48ead;">var </span><span style="color:#bf616a;">from_ip_string </span><span>= </span><span style="color:#8fa1b3;">int2ip</span><span>(</span><span style="color:#8fa1b3;">swap32</span><span>(</span><span style="color:#bf616a;">this</span><span>.</span><span style="color:#bf616a;">from_obj</span><span>.</span><span style="color:#96b5b4;">add</span><span>(</span><span style="color:#d08770;">6</span><span>).</span><span style="color:#8fa1b3;">readU32</span><span>()));
+</span><span>        </span><span style="color:#b48ead;">var </span><span style="color:#bf616a;">local_port </span><span>= </span><span style="color:#8fa1b3;">swap16</span><span>(</span><span style="color:#bf616a;">this</span><span>.</span><span style="color:#bf616a;">sock_obj</span><span>.</span><span style="color:#8fa1b3;">readU16</span><span>());
+</span><span>        </span><span style="color:#ebcb8b;">console</span><span>.</span><span style="color:#96b5b4;">log</span><span>(&#39;</span><span style="color:#a3be8c;">[+] Received: </span><span>&#39; + </span><span style="color:#bf616a;">local_port </span><span>+ &#39;</span><span style="color:#a3be8c;"> &lt;-- </span><span>&#39; + </span><span style="color:#bf616a;">from_ip_string </span><span>+ &#39;</span><span style="color:#a3be8c;">:</span><span>&#39; + </span><span style="color:#bf616a;">from_port</span><span>);
+</span><span>        </span><span style="color:#ebcb8b;">console</span><span>.</span><span style="color:#96b5b4;">log</span><span>(&#39;</span><span style="color:#a3be8c;">[+] Return: </span><span>&#39; + </span><span style="color:#bf616a;">this</span><span>.</span><span style="color:#bf616a;">returnAddress </span><span>+ &#39;</span><span style="color:#a3be8c;"> ThreadId: </span><span>&#39; + </span><span style="color:#bf616a;">this</span><span>.</span><span style="color:#bf616a;">threadId</span><span>);
+</span><span>        </span><span style="color:#b48ead;">var </span><span style="color:#bf616a;">recv_len </span><span>= </span><span style="color:#bf616a;">retval</span><span>.</span><span style="color:#8fa1b3;">toInt32</span><span>();
+</span><span>        </span><span style="color:#b48ead;">if </span><span>(</span><span style="color:#bf616a;">recv_len </span><span>&lt; </span><span style="color:#d08770;">0</span><span>) {
+</span><span>            </span><span style="color:#ebcb8b;">console</span><span>.</span><span style="color:#96b5b4;">log</span><span>(&#39;</span><span style="color:#a3be8c;">Error: </span><span>&#39; + </span><span style="color:#bf616a;">recv_len</span><span>);
+</span><span>        } </span><span style="color:#b48ead;">else </span><span>{
+</span><span>            </span><span style="color:#ebcb8b;">console</span><span>.</span><span style="color:#96b5b4;">log</span><span>(</span><span style="color:#8fa1b3;">hexdump</span><span>(</span><span style="color:#bf616a;">this</span><span>.</span><span style="color:#bf616a;">recvbuf</span><span>, {
+</span><span>                offset: </span><span style="color:#d08770;">0</span><span>,
+</span><span>                length: </span><span style="color:#bf616a;">recv_len</span><span>,
+</span><span>                header: </span><span style="color:#d08770;">true</span><span>,
+</span><span>                ansi: </span><span style="color:#d08770;">true
+</span><span>            }));
+</span><span>        }
+</span><span>    },
+</span><span>});
+</span></code></pre>
+<p>Now while interacting with the lobby I could see the output of each log and the packets being sent and received.</p>
+<div class="textCenter">
+  <a class="lightbox" href="img&#x2F;populous3_frida_output.png">
+    <img src="img&#x2F;populous3_frida_output.png" >
+  </a>
+  
+</div>
+<p>After all of that, it was time to start reverse engineering for real.</p>
+<h2 id="reconstructing-network-related-structures">Reconstructing network related structures</h2>
+<p>This part is basically about reading decompiled code and understanding what it is doing, there's no secret, every function will give you a hint on what a structure is used for and that hint can help you understand a different function. I'm going to list some of the most relevant structures I reconstructed and add a comment about any interesting fields.</p>
+<h3 id="player-s-description">Player's description</h3>
+<pre data-lang="c" style="background-color:#2b303b;color:#c0c5ce;" class="language-c "><code class="language-c" data-lang="c"><span style="color:#b48ead;">struct </span><span>PLAYERDESC
+</span><span>{
+</span><span>  wchar_t name[</span><span style="color:#d08770;">16</span><span>];
+</span><span>  uint id;
+</span><span>  uint unknown;
+</span><span>  uint unknown2;
+</span><span>  uint unknown3;
+</span><span>  uint unknown4;
+</span><span>  byte flags;
+</span><span>  byte slot;
+</span><span>  uint ip;
+</span><span>  ushort port;
+</span><span>  </span><span style="color:#b48ead;">char</span><span> guid[</span><span style="color:#d08770;">16</span><span>];
+</span><span>  </span><span style="color:#b48ead;">char</span><span> pad[</span><span style="color:#d08770;">3</span><span>];
+</span><span>};
+</span></code></pre>
+<ul>
+<li><strong>id</strong>: derived from player slot.</li>
+<li><strong>flags</strong>: has info about the player's status: ready, in-game, ...</li>
+<li><strong>slot</strong>: position in the session.</li>
+<li><strong>guid</strong>: generated from IP and date of connection.</li>
+</ul>
+<h3 id="my-player-s-description">My player's description</h3>
+<pre data-lang="c" style="background-color:#2b303b;color:#c0c5ce;" class="language-c "><code class="language-c" data-lang="c"><span style="color:#b48ead;">struct </span><span>MYPLAYERDESC
+</span><span>{
+</span><span>  GAME_FLAGS flags;
+</span><span>  uint id;
+</span><span>  uint slot;
+</span><span>  </span><span style="color:#b48ead;">char</span><span> pad[</span><span style="color:#d08770;">33</span><span>];
+</span><span>};
+</span></code></pre>
+<ul>
+<li><strong>flags</strong>: has info about my player's status: is hosting the game, is a player, in-game, ...</li>
+</ul>
+<h3 id="session-s-description">Session's description</h3>
+<pre data-lang="c" style="background-color:#2b303b;color:#c0c5ce;" class="language-c "><code class="language-c" data-lang="c"><span style="color:#b48ead;">struct </span><span>SESSIONDESC
+</span><span>{
+</span><span>  uint game_verison;
+</span><span>  </span><span style="color:#b48ead;">char</span><span> session_guid[</span><span style="color:#d08770;">16</span><span>];
+</span><span>  </span><span style="color:#b48ead;">char</span><span> game_guid[</span><span style="color:#d08770;">16</span><span>];
+</span><span>  uint max_players;
+</span><span>  uint current_players;
+</span><span>  </span><span style="color:#b48ead;">char</span><span> unknown_guid[</span><span style="color:#d08770;">16</span><span>];
+</span><span>  uint session_flags;
+</span><span>  uint language_id;
+</span><span>  uint unknown4;
+</span><span>  uint unknown5;
+</span><span>  uint unknown6;
+</span><span>  BF_Socket socket;
+</span><span>  </span><span style="color:#b48ead;">char</span><span> padding[</span><span style="color:#d08770;">10</span><span>];
+</span><span>  wchar_t name[</span><span style="color:#d08770;">16</span><span>];
+</span><span>  wchar_t unknown_pad[</span><span style="color:#d08770;">16</span><span>];
+</span><span>};
+</span></code></pre>
+<ul>
+<li><strong>game_version</strong>: 1.1 base game or 1.2 with <em>Undiscovered Worlds</em> expansion.</li>
+<li><strong>game_guid</strong>: identifies the game <em>Populous: The Beginning</em> since it looks like the network protocol is shared with <em><a href="https://en.wikipedia.org/wiki/Dungeon_Keeper_2">Dungeon Keeper 2</a></em>.</li>
+<li><strong>session_flags</strong>: info about the session such as: open to joining, has password, ...</li>
+</ul>
+<h3 id="network-information">Network information</h3>
+<pre data-lang="c" style="background-color:#2b303b;color:#c0c5ce;" class="language-c "><code class="language-c" data-lang="c"><span style="color:#b48ead;">struct </span><span>NETWORKADDRESS
+</span><span>{
+</span><span>  </span><span style="color:#b48ead;">char</span><span> BF_Header[</span><span style="color:#d08770;">2</span><span>];
+</span><span>  __int128 BFSGUID;
+</span><span>  </span><span style="color:#b48ead;">char </span><span>*IP_StringPTR;
+</span><span>  size_t IP_StringLength;
+</span><span>  ushort Port;
+</span><span>  </span><span style="color:#b48ead;">char</span><span> pad[</span><span style="color:#d08770;">4</span><span>];
+</span><span>  ushort Zero;
+</span><span>  </span><span style="color:#b48ead;">char</span><span> IP_String;
+</span><span>};
+</span></code></pre>
+<ul>
+<li><strong>BF_Header</strong>: constant chars 'BF' probably identifies the company <em><a href="https://en.wikipedia.org/wiki/Bullfrog_Productions">Bullfrog Productions</a></em>.</li>
+<li><strong>BFSGUID</strong>: indicates what protocol stack to use but only supports UDP/IP.</li>
+</ul>
+<h3 id="general-game-s-network-information">General game's network information</h3>
+<pre data-lang="c" style="background-color:#2b303b;color:#c0c5ce;" class="language-c "><code class="language-c" data-lang="c"><span style="color:#b48ead;">struct </span><span>NetworkServiceProvider
+</span><span>{
+</span><span>  NetworkServiceProvider_vtbl *__vftable </span><span style="color:#65737e;">/*VFT*/</span><span>;
+</span><span>  </span><span style="color:#b48ead;">int</span><span> always_zero;
+</span><span>  CRITICAL_SECTION CriticalSection;
+</span><span>  </span><span style="color:#b48ead;">int</span><span> is_initialized;
+</span><span>  PLAYERDESC *player_list;
+</span><span>  uint host_id;
+</span><span>  </span><span style="color:#b48ead;">void </span><span>*callback_parse_packet;
+</span><span>  BF_NetworkAddress *networkAddress;
+</span><span>  </span><span style="color:#b48ead;">char</span><span> player_guid[</span><span style="color:#d08770;">16</span><span>];
+</span><span>  __int128 game_guid;
+</span><span>  uint host_ip;
+</span><span>  ushort host_port;
+</span><span>  </span><span style="color:#b48ead;">char</span><span> pad3_2[</span><span style="color:#d08770;">280</span><span>];
+</span><span>  HANDLE StartThread_event;
+</span><span>  HANDLE KillThread_event;
+</span><span>  HANDLE GuaranteedThread_event;
+</span><span>  HANDLE service_provider_thread;
+</span><span>  </span><span style="color:#b48ead;">char</span><span> pad4[</span><span style="color:#d08770;">4</span><span>];
+</span><span>  SESSIONDESC sessiondesc;
+</span><span>  GAMEDESC game_desc;
+</span><span>  </span><span style="color:#b48ead;">char</span><span> pad5[</span><span style="color:#d08770;">457</span><span>];
+</span><span>  wchar_t session_password[</span><span style="color:#d08770;">32</span><span>];
+</span><span>  </span><span style="color:#b48ead;">char </span><span>*debug_server_struct;
+</span><span>  </span><span style="color:#b48ead;">char </span><span>*recv_buffer;
+</span><span>  uint last_player_id;
+</span><span>  LPWSADATA lpWSAData;
+</span><span>  BF_Socket recv_socket;
+</span><span>  </span><span style="color:#b48ead;">char</span><span> pad7[</span><span style="color:#d08770;">74</span><span>];
+</span><span>};
+</span></code></pre>
+<ul>
+<li><strong>callback_parse_packet</strong>: callback to the function in the main executable responsible for in-game packet parsing.</li>
+<li><strong>debug_server_struct</strong>: points to a debugging structure used for connectivity tests.</li>
+<li><strong>recv_buffer</strong>: the buffer where the current network packet is stored.</li>
+</ul>
+<h3 id="network-vtable">Network vtable</h3>
+<pre data-lang="c" style="background-color:#2b303b;color:#c0c5ce;" class="language-c "><code class="language-c" data-lang="c"><span style="color:#b48ead;">struct </span><span style="color:#65737e;">/*VFT*/ </span><span>NetworkServiceProvider_vtbl
+</span><span>{
+</span><span>  </span><span style="color:#b48ead;">void </span><span>*Initialize
+</span><span>  </span><span style="color:#b48ead;">void </span><span>*ShutDown;
+</span><span>  </span><span style="color:#b48ead;">void </span><span>*SetupConnection;
+</span><span>  </span><span style="color:#b48ead;">void </span><span>*EnumerateLocalServices;
+</span><span>  </span><span style="color:#b48ead;">void </span><span>*AreWeLobbied;
+</span><span>  </span><span style="color:#b48ead;">void </span><span>*EnumerateLobbyApplications;
+</span><span>  </span><span style="color:#b48ead;">void </span><span>*RunLobbyApplication;
+</span><span>  </span><span style="color:#b48ead;">void </span><span>*CreateSPSession;
+</span><span>  </span><span style="color:#b48ead;">void </span><span>*JoinSPSession;
+</span><span>  </span><span style="color:#b48ead;">void </span><span>*DestroySPSession;
+</span><span>  </span><span style="color:#b48ead;">void </span><span>*EnumerateSession;
+</span><span>  </span><span style="color:#b48ead;">void </span><span>*EnableNewPlayers;
+</span><span>  </span><span style="color:#b48ead;">void </span><span>*EnumeratePlayers;
+</span><span>  </span><span style="color:#b48ead;">void </span><span>*SendMessage;
+</span><span>  </span><span style="color:#b48ead;">void </span><span>*SendMessageTo;
+</span><span>  </span><span style="color:#b48ead;">void </span><span>*ReadSPMessage;
+</span><span>  </span><span style="color:#b48ead;">void </span><span>*ChangeHost;
+</span><span>  </span><span style="color:#b48ead;">void </span><span>*SendMSResults;
+</span><span>  </span><span style="color:#b48ead;">void </span><span>*EnumerateNetworkMediumsModem;
+</span><span>  </span><span style="color:#b48ead;">void </span><span>*EnumerateNetworkMediumsDPlay;
+</span><span>  </span><span style="color:#b48ead;">void </span><span>*CreateNetworkAddress;
+</span><span>  </span><span style="color:#b48ead;">void </span><span>*GetPlayerSlot;
+</span><span>  </span><span style="color:#b48ead;">void </span><span>*ParseDatagram;
+</span><span>};
+</span></code></pre>
+<ul>
+<li><strong>EnumerateLobbyApplications, RunLobbyApplication, EnumeratePlayers, EnumerateNetworkMediumsModem &amp; EnumerateNetworkMediumsDPlay</strong>: not implemented for this protocol stack.</li>
+<li><strong>ReadSPMessage</strong>: receives, parses and interpretes packets related to the lobby.</li>
+<li><strong>ParseDatagram</strong>: receives in-game packets and sends them to the main executable.</li>
+</ul>
+<p>These are all the main structures that I used to understand the code's functionality. Now let's move to the network packets used in this game, I decided to refer to the protocol as <em>BF protocol</em> due to its header magic.</p>
+<h2 id="bf-protocol-packets">BF protocol packets</h2>
+<p>I'm a big fan of <a href="https://kaitai.io/">Kaitai Struct</a> for creating packet definitions and easy parsing so I created a KSY file that defines the main packets used in the lobby.</p>
+<pre data-lang="yaml" style="background-color:#2b303b;color:#c0c5ce;" class="language-yaml "><code class="language-yaml" data-lang="yaml"><span style="color:#bf616a;">meta</span><span>:
+</span><span>  </span><span style="color:#bf616a;">id</span><span>: </span><span style="color:#a3be8c;">bf_packet
+</span><span>  </span><span style="color:#bf616a;">endian</span><span>: </span><span style="color:#a3be8c;">le
+</span><span style="color:#bf616a;">seq</span><span>:
+</span><span>  - </span><span style="color:#bf616a;">id</span><span>: </span><span style="color:#a3be8c;">header
+</span><span>    </span><span style="color:#bf616a;">type</span><span>: </span><span style="color:#a3be8c;">header
+</span><span>  - </span><span style="color:#bf616a;">id</span><span>: </span><span style="color:#a3be8c;">body
+</span><span>    </span><span style="color:#bf616a;">type</span><span>:
+</span><span>      </span><span style="color:#bf616a;">switch-on</span><span>: </span><span style="color:#a3be8c;">header.type
+</span><span>      </span><span style="color:#bf616a;">cases</span><span>:
+</span><span>        &#39;</span><span style="color:#a3be8c;">packet_type::discover</span><span>&#39;: </span><span style="color:#a3be8c;">discover_body
+</span><span>        &#39;</span><span style="color:#a3be8c;">packet_type::session_info</span><span>&#39;: </span><span style="color:#a3be8c;">session_info_body
+</span><span>        &#39;</span><span style="color:#a3be8c;">packet_type::request_join</span><span>&#39;: </span><span style="color:#a3be8c;">request_join_body
+</span><span>        &#39;</span><span style="color:#a3be8c;">packet_type::confirm_join</span><span>&#39;: </span><span style="color:#a3be8c;">confirm_join_body
+</span><span>        &#39;</span><span style="color:#a3be8c;">packet_type::leave_session</span><span>&#39;: </span><span style="color:#a3be8c;">leave_session_body
+</span><span>        &#39;</span><span style="color:#a3be8c;">packet_type::chat</span><span>&#39;: </span><span style="color:#a3be8c;">chat_body
+</span><span>        &#39;</span><span style="color:#a3be8c;">packet_type::datagram</span><span>&#39;: </span><span style="color:#a3be8c;">datagram_body
+</span><span>        &#39;</span><span style="color:#a3be8c;">packet_type::session_players</span><span>&#39;: </span><span style="color:#a3be8c;">session_players_body
+</span><span>        &#39;</span><span style="color:#a3be8c;">packet_type::acknowledge</span><span>&#39;: </span><span style="color:#a3be8c;">acknowledge_body
+</span><span>        &#39;</span><span style="color:#a3be8c;">packet_type::host_change</span><span>&#39;: </span><span style="color:#a3be8c;">host_change_body
+</span><span>        &#39;</span><span style="color:#a3be8c;">packet_type::destroy_player</span><span>&#39;: </span><span style="color:#a3be8c;">destroy_player_body
+</span><span>        &#39;</span><span style="color:#a3be8c;">packet_type::add_player</span><span>&#39;: </span><span style="color:#a3be8c;">add_player_body
+</span><span style="color:#bf616a;">types</span><span>:
+</span><span>    </span><span style="color:#bf616a;">header</span><span>:
+</span><span>      </span><span style="color:#bf616a;">seq</span><span>:
+</span><span>        - </span><span style="color:#bf616a;">id</span><span>: </span><span style="color:#a3be8c;">magic
+</span><span>          </span><span style="color:#bf616a;">contents</span><span>: [</span><span style="color:#d08770;">0xBF</span><span>]
+</span><span>        - </span><span style="color:#bf616a;">id</span><span>: </span><span style="color:#a3be8c;">type
+</span><span>          </span><span style="color:#bf616a;">type</span><span>: </span><span style="color:#a3be8c;">u1
+</span><span>          </span><span style="color:#bf616a;">enum</span><span>: </span><span style="color:#a3be8c;">packet_type
+</span><span>    </span><span style="color:#bf616a;">add_player_body</span><span>:
+</span><span>      </span><span style="color:#bf616a;">seq</span><span>:
+</span><span>        - </span><span style="color:#bf616a;">id</span><span>: </span><span style="color:#a3be8c;">pad
+</span><span>          </span><span style="color:#bf616a;">size</span><span>: </span><span style="color:#d08770;">19
+</span><span>        - </span><span style="color:#bf616a;">id</span><span>: </span><span style="color:#a3be8c;">max_players
+</span><span>          </span><span style="color:#bf616a;">type</span><span>: </span><span style="color:#a3be8c;">u4
+</span><span>        - </span><span style="color:#bf616a;">id</span><span>: </span><span style="color:#a3be8c;">current_players
+</span><span>          </span><span style="color:#bf616a;">type</span><span>: </span><span style="color:#a3be8c;">u4
+</span><span>        - </span><span style="color:#bf616a;">id</span><span>: </span><span style="color:#a3be8c;">pad2
+</span><span>          </span><span style="color:#bf616a;">size</span><span>: </span><span style="color:#d08770;">16
+</span><span>        - </span><span style="color:#bf616a;">id</span><span>: </span><span style="color:#a3be8c;">game_guid
+</span><span>          </span><span style="color:#bf616a;">size</span><span>: </span><span style="color:#d08770;">16
+</span><span>        - </span><span style="color:#bf616a;">id</span><span>: </span><span style="color:#a3be8c;">session_guid
+</span><span>          </span><span style="color:#bf616a;">size</span><span>: </span><span style="color:#d08770;">16
+</span><span>        - </span><span style="color:#bf616a;">id</span><span>: </span><span style="color:#a3be8c;">player_list
+</span><span>          </span><span style="color:#bf616a;">type</span><span>: </span><span style="color:#a3be8c;">player_info
+</span><span>    </span><span style="color:#bf616a;">datagram_body</span><span>:
+</span><span>      </span><span style="color:#bf616a;">seq</span><span>:
+</span><span>        - </span><span style="color:#bf616a;">id</span><span>: </span><span style="color:#a3be8c;">pad
+</span><span>          </span><span style="color:#bf616a;">size</span><span>: </span><span style="color:#d08770;">1
+</span><span>        - </span><span style="color:#bf616a;">id</span><span>: </span><span style="color:#a3be8c;">sender_slot
+</span><span>          </span><span style="color:#bf616a;">type</span><span>: </span><span style="color:#a3be8c;">u4
+</span><span>        - </span><span style="color:#bf616a;">id</span><span>: </span><span style="color:#a3be8c;">destination_slot
+</span><span>          </span><span style="color:#bf616a;">type</span><span>: </span><span style="color:#a3be8c;">u4
+</span><span>          </span><span style="color:#bf616a;">enum</span><span>: </span><span style="color:#a3be8c;">receiver_type
+</span><span>        - </span><span style="color:#bf616a;">id</span><span>: </span><span style="color:#a3be8c;">len
+</span><span>          </span><span style="color:#bf616a;">type</span><span>: </span><span style="color:#a3be8c;">u2
+</span><span>        - </span><span style="color:#bf616a;">id</span><span>: </span><span style="color:#a3be8c;">message
+</span><span>          </span><span style="color:#bf616a;">type</span><span>: </span><span style="color:#a3be8c;">datagram
+</span><span>          </span><span style="color:#bf616a;">size</span><span>: </span><span style="color:#a3be8c;">len
+</span><span>    </span><span style="color:#bf616a;">chat_body</span><span>:
+</span><span>      </span><span style="color:#bf616a;">seq</span><span>:
+</span><span>        - </span><span style="color:#bf616a;">id</span><span>: </span><span style="color:#a3be8c;">pad
+</span><span>          </span><span style="color:#bf616a;">size</span><span>: </span><span style="color:#d08770;">1
+</span><span>        - </span><span style="color:#bf616a;">id</span><span>: </span><span style="color:#a3be8c;">sender_slot
+</span><span>          </span><span style="color:#bf616a;">type</span><span>: </span><span style="color:#a3be8c;">u4
+</span><span>        - </span><span style="color:#bf616a;">id</span><span>: </span><span style="color:#a3be8c;">destination_slot
+</span><span>          </span><span style="color:#bf616a;">type</span><span>: </span><span style="color:#a3be8c;">u4
+</span><span>          </span><span style="color:#bf616a;">enum</span><span>: </span><span style="color:#a3be8c;">receiver_type
+</span><span>        - </span><span style="color:#bf616a;">id</span><span>: </span><span style="color:#a3be8c;">len
+</span><span>          </span><span style="color:#bf616a;">type</span><span>: </span><span style="color:#a3be8c;">u2
+</span><span>        - </span><span style="color:#bf616a;">id</span><span>: </span><span style="color:#a3be8c;">message
+</span><span>          </span><span style="color:#bf616a;">type</span><span>: </span><span style="color:#a3be8c;">str
+</span><span>          </span><span style="color:#bf616a;">size</span><span>: </span><span style="color:#a3be8c;">len
+</span><span>          </span><span style="color:#bf616a;">encoding</span><span>: </span><span style="color:#a3be8c;">UTF-16
+</span><span>    </span><span style="color:#bf616a;">discover_body</span><span>:
+</span><span>      </span><span style="color:#bf616a;">seq</span><span>:
+</span><span>        - </span><span style="color:#bf616a;">id</span><span>: </span><span style="color:#a3be8c;">padding
+</span><span>          </span><span style="color:#bf616a;">size</span><span>: </span><span style="color:#d08770;">11
+</span><span>        - </span><span style="color:#bf616a;">id</span><span>: </span><span style="color:#a3be8c;">game_guid
+</span><span>          </span><span style="color:#bf616a;">size</span><span>: </span><span style="color:#d08770;">16
+</span><span>    </span><span style="color:#bf616a;">session_info_body</span><span>:
+</span><span>      </span><span style="color:#bf616a;">seq</span><span>:
+</span><span>        - </span><span style="color:#bf616a;">id</span><span>: </span><span style="color:#a3be8c;">padding
+</span><span>          </span><span style="color:#bf616a;">size</span><span>: </span><span style="color:#d08770;">11
+</span><span>        - </span><span style="color:#bf616a;">id</span><span>: </span><span style="color:#a3be8c;">session_desc
+</span><span>          </span><span style="color:#bf616a;">type</span><span>: </span><span style="color:#a3be8c;">session_desc
+</span><span>    </span><span style="color:#bf616a;">request_join_body</span><span>:
+</span><span>      </span><span style="color:#bf616a;">seq</span><span>:
+</span><span>        - </span><span style="color:#bf616a;">id</span><span>: </span><span style="color:#a3be8c;">padding
+</span><span>          </span><span style="color:#bf616a;">size</span><span>: </span><span style="color:#d08770;">15
+</span><span>        - </span><span style="color:#bf616a;">id</span><span>: </span><span style="color:#a3be8c;">game_guid
+</span><span>          </span><span style="color:#bf616a;">size</span><span>: </span><span style="color:#d08770;">16
+</span><span>        - </span><span style="color:#bf616a;">id</span><span>: </span><span style="color:#a3be8c;">session_guid
+</span><span>          </span><span style="color:#bf616a;">size</span><span>: </span><span style="color:#d08770;">16
+</span><span>        - </span><span style="color:#bf616a;">id</span><span>: </span><span style="color:#a3be8c;">player_guid
+</span><span>          </span><span style="color:#bf616a;">size</span><span>: </span><span style="color:#d08770;">16
+</span><span>        - </span><span style="color:#bf616a;">id</span><span>: </span><span style="color:#a3be8c;">player_name
+</span><span>          </span><span style="color:#bf616a;">type</span><span>: </span><span style="color:#a3be8c;">str
+</span><span>          </span><span style="color:#bf616a;">size</span><span>: </span><span style="color:#d08770;">32
+</span><span>          </span><span style="color:#bf616a;">encoding</span><span>: </span><span style="color:#a3be8c;">UTF-16
+</span><span>        - </span><span style="color:#bf616a;">id</span><span>: </span><span style="color:#a3be8c;">password
+</span><span>          </span><span style="color:#bf616a;">type</span><span>: </span><span style="color:#a3be8c;">str
+</span><span>          </span><span style="color:#bf616a;">size</span><span>: </span><span style="color:#d08770;">64
+</span><span>          </span><span style="color:#bf616a;">encoding</span><span>: </span><span style="color:#a3be8c;">UTF-16
+</span><span>    </span><span style="color:#bf616a;">confirm_join_body</span><span>:
+</span><span>      </span><span style="color:#bf616a;">seq</span><span>:
+</span><span>        - </span><span style="color:#bf616a;">id</span><span>: </span><span style="color:#a3be8c;">padding
+</span><span>          </span><span style="color:#bf616a;">size</span><span>: </span><span style="color:#d08770;">15
+</span><span>        - </span><span style="color:#bf616a;">id</span><span>: </span><span style="color:#a3be8c;">game_guid
+</span><span>          </span><span style="color:#bf616a;">size</span><span>: </span><span style="color:#d08770;">16
+</span><span>        - </span><span style="color:#bf616a;">id</span><span>: </span><span style="color:#a3be8c;">session_guid
+</span><span>          </span><span style="color:#bf616a;">size</span><span>: </span><span style="color:#d08770;">16
+</span><span>        - </span><span style="color:#bf616a;">id</span><span>: </span><span style="color:#a3be8c;">player_guid
+</span><span>          </span><span style="color:#bf616a;">size</span><span>: </span><span style="color:#d08770;">16
+</span><span>        - </span><span style="color:#bf616a;">id</span><span>: </span><span style="color:#a3be8c;">player_id
+</span><span>          </span><span style="color:#bf616a;">type</span><span>: </span><span style="color:#a3be8c;">u4
+</span><span>        - </span><span style="color:#bf616a;">id</span><span>: </span><span style="color:#a3be8c;">host_id
+</span><span>          </span><span style="color:#bf616a;">type</span><span>: </span><span style="color:#a3be8c;">u4
+</span><span>        - </span><span style="color:#bf616a;">id</span><span>: </span><span style="color:#a3be8c;">max_players
+</span><span>          </span><span style="color:#bf616a;">type</span><span>: </span><span style="color:#a3be8c;">u4
+</span><span>        - </span><span style="color:#bf616a;">id</span><span>: </span><span style="color:#a3be8c;">current_players
+</span><span>          </span><span style="color:#bf616a;">type</span><span>: </span><span style="color:#a3be8c;">u4
+</span><span>        - </span><span style="color:#bf616a;">id</span><span>: </span><span style="color:#a3be8c;">padding2
+</span><span>          </span><span style="color:#bf616a;">size</span><span>: </span><span style="color:#d08770;">16
+</span><span>    </span><span style="color:#bf616a;">destroy_player_body</span><span>:
+</span><span>      </span><span style="color:#bf616a;">seq</span><span>:
+</span><span>      - </span><span style="color:#bf616a;">id</span><span>: </span><span style="color:#a3be8c;">padding
+</span><span>        </span><span style="color:#bf616a;">size</span><span>: </span><span style="color:#d08770;">15
+</span><span>      - </span><span style="color:#bf616a;">id</span><span>: </span><span style="color:#a3be8c;">packet_id
+</span><span>        </span><span style="color:#bf616a;">type</span><span>: </span><span style="color:#a3be8c;">u4
+</span><span>      - </span><span style="color:#bf616a;">id</span><span>: </span><span style="color:#a3be8c;">max_players
+</span><span>        </span><span style="color:#bf616a;">type</span><span>: </span><span style="color:#a3be8c;">u4
+</span><span>      - </span><span style="color:#bf616a;">id</span><span>: </span><span style="color:#a3be8c;">current_players
+</span><span>        </span><span style="color:#bf616a;">type</span><span>: </span><span style="color:#a3be8c;">u4
+</span><span>      - </span><span style="color:#bf616a;">id</span><span>: </span><span style="color:#a3be8c;">padding2
+</span><span>        </span><span style="color:#bf616a;">size</span><span>: </span><span style="color:#d08770;">16
+</span><span>      - </span><span style="color:#bf616a;">id</span><span>: </span><span style="color:#a3be8c;">game_guid
+</span><span>        </span><span style="color:#bf616a;">size</span><span>: </span><span style="color:#d08770;">16
+</span><span>      - </span><span style="color:#bf616a;">id</span><span>: </span><span style="color:#a3be8c;">session_guid
+</span><span>        </span><span style="color:#bf616a;">size</span><span>: </span><span style="color:#d08770;">16
+</span><span>      - </span><span style="color:#bf616a;">id</span><span>: </span><span style="color:#a3be8c;">padding3
+</span><span>        </span><span style="color:#bf616a;">size</span><span>: </span><span style="color:#d08770;">16
+</span><span>      - </span><span style="color:#bf616a;">id</span><span>: </span><span style="color:#a3be8c;">player_id
+</span><span>        </span><span style="color:#bf616a;">type</span><span>: </span><span style="color:#a3be8c;">u4
+</span><span>    </span><span style="color:#bf616a;">leave_session_body</span><span>:
+</span><span>      </span><span style="color:#bf616a;">seq</span><span>:
+</span><span>        - </span><span style="color:#bf616a;">id</span><span>: </span><span style="color:#a3be8c;">padding
+</span><span>          </span><span style="color:#bf616a;">size</span><span>: </span><span style="color:#d08770;">43
+</span><span>        - </span><span style="color:#bf616a;">id</span><span>: </span><span style="color:#a3be8c;">game_guid
+</span><span>          </span><span style="color:#bf616a;">size</span><span>: </span><span style="color:#d08770;">16
+</span><span>        - </span><span style="color:#bf616a;">id</span><span>: </span><span style="color:#a3be8c;">session_guid
+</span><span>          </span><span style="color:#bf616a;">size</span><span>: </span><span style="color:#d08770;">16
+</span><span>        - </span><span style="color:#bf616a;">id</span><span>: </span><span style="color:#a3be8c;">player_guid
+</span><span>          </span><span style="color:#bf616a;">size</span><span>: </span><span style="color:#d08770;">16
+</span><span>        - </span><span style="color:#bf616a;">id</span><span>: </span><span style="color:#a3be8c;">player_id
+</span><span>          </span><span style="color:#bf616a;">type</span><span>: </span><span style="color:#a3be8c;">u4
+</span><span>    </span><span style="color:#bf616a;">session_players_body</span><span>:
+</span><span>      </span><span style="color:#bf616a;">seq</span><span>:
+</span><span>        - </span><span style="color:#bf616a;">id</span><span>: </span><span style="color:#a3be8c;">pad
+</span><span>          </span><span style="color:#bf616a;">size</span><span>: </span><span style="color:#d08770;">11
+</span><span>        - </span><span style="color:#bf616a;">id</span><span>: </span><span style="color:#a3be8c;">packet_id
+</span><span>          </span><span style="color:#bf616a;">type</span><span>: </span><span style="color:#a3be8c;">u4
+</span><span>        - </span><span style="color:#bf616a;">id</span><span>: </span><span style="color:#a3be8c;">player_id
+</span><span>          </span><span style="color:#bf616a;">type</span><span>: </span><span style="color:#a3be8c;">u4
+</span><span>        - </span><span style="color:#bf616a;">id</span><span>: </span><span style="color:#a3be8c;">max_players
+</span><span>          </span><span style="color:#bf616a;">type</span><span>: </span><span style="color:#a3be8c;">u4
+</span><span>        - </span><span style="color:#bf616a;">id</span><span>: </span><span style="color:#a3be8c;">current_players
+</span><span>          </span><span style="color:#bf616a;">type</span><span>: </span><span style="color:#a3be8c;">u4
+</span><span>        - </span><span style="color:#bf616a;">id</span><span>: </span><span style="color:#a3be8c;">pad2
+</span><span>          </span><span style="color:#bf616a;">size</span><span>: </span><span style="color:#d08770;">16
+</span><span>        - </span><span style="color:#bf616a;">id</span><span>: </span><span style="color:#a3be8c;">player_list_len
+</span><span>          </span><span style="color:#bf616a;">type</span><span>: </span><span style="color:#a3be8c;">u4
+</span><span>        - </span><span style="color:#bf616a;">id</span><span>: </span><span style="color:#a3be8c;">player_list
+</span><span>          </span><span style="color:#bf616a;">type</span><span>: </span><span style="color:#a3be8c;">player_info
+</span><span>          </span><span style="color:#bf616a;">repeat</span><span>: </span><span style="color:#a3be8c;">expr
+</span><span>          </span><span style="color:#bf616a;">repeat-expr</span><span>: </span><span style="color:#a3be8c;">player_list_len
+</span><span>        - </span><span style="color:#bf616a;">id</span><span>: </span><span style="color:#a3be8c;">pad3
+</span><span>          </span><span style="color:#bf616a;">size-eos</span><span>: </span><span style="color:#d08770;">true
+</span><span>    </span><span style="color:#bf616a;">acknowledge_body</span><span>:
+</span><span>      </span><span style="color:#bf616a;">seq</span><span>:
+</span><span>        - </span><span style="color:#bf616a;">id</span><span>: </span><span style="color:#a3be8c;">pad
+</span><span>          </span><span style="color:#bf616a;">size</span><span>: </span><span style="color:#d08770;">1
+</span><span>        - </span><span style="color:#bf616a;">id</span><span>: </span><span style="color:#a3be8c;">sender_slot
+</span><span>          </span><span style="color:#bf616a;">type</span><span>: </span><span style="color:#a3be8c;">u4
+</span><span>        - </span><span style="color:#bf616a;">id</span><span>: </span><span style="color:#a3be8c;">destination_slot
+</span><span>          </span><span style="color:#bf616a;">type</span><span>: </span><span style="color:#a3be8c;">u4
+</span><span>          </span><span style="color:#bf616a;">enum</span><span>: </span><span style="color:#a3be8c;">receiver_type
+</span><span>        - </span><span style="color:#bf616a;">id</span><span>: </span><span style="color:#a3be8c;">pad2
+</span><span>          </span><span style="color:#bf616a;">size</span><span>: </span><span style="color:#d08770;">2
+</span><span>        - </span><span style="color:#bf616a;">id</span><span>: </span><span style="color:#a3be8c;">sender_id
+</span><span>          </span><span style="color:#bf616a;">type</span><span>: </span><span style="color:#a3be8c;">u4
+</span><span>        - </span><span style="color:#bf616a;">id</span><span>: </span><span style="color:#a3be8c;">packet_id
+</span><span>          </span><span style="color:#bf616a;">type</span><span>: </span><span style="color:#a3be8c;">u4
+</span><span>        - </span><span style="color:#bf616a;">id</span><span>: </span><span style="color:#a3be8c;">pad3
+</span><span>          </span><span style="color:#bf616a;">size-eos</span><span>: </span><span style="color:#d08770;">true
+</span><span>    </span><span style="color:#bf616a;">host_change_body</span><span>:
+</span><span>      </span><span style="color:#bf616a;">seq</span><span>:
+</span><span>        - </span><span style="color:#bf616a;">id</span><span>: </span><span style="color:#a3be8c;">body
+</span><span>          </span><span style="color:#bf616a;">size</span><span>: </span><span style="color:#d08770;">15
+</span><span>        - </span><span style="color:#bf616a;">id</span><span>: </span><span style="color:#a3be8c;">unknown
+</span><span>          </span><span style="color:#bf616a;">type</span><span>: </span><span style="color:#a3be8c;">u4
+</span><span>        - </span><span style="color:#bf616a;">id</span><span>: </span><span style="color:#a3be8c;">session_flags
+</span><span>          </span><span style="color:#bf616a;">type</span><span>: </span><span style="color:#a3be8c;">u4
+</span><span>        - </span><span style="color:#bf616a;">id</span><span>: </span><span style="color:#a3be8c;">old_host_id
+</span><span>          </span><span style="color:#bf616a;">type</span><span>: </span><span style="color:#a3be8c;">u4
+</span><span>        - </span><span style="color:#bf616a;">id</span><span>: </span><span style="color:#a3be8c;">max_players
+</span><span>          </span><span style="color:#bf616a;">type</span><span>: </span><span style="color:#a3be8c;">u4
+</span><span>        - </span><span style="color:#bf616a;">id</span><span>: </span><span style="color:#a3be8c;">current_players
+</span><span>          </span><span style="color:#bf616a;">type</span><span>: </span><span style="color:#a3be8c;">u4
+</span><span>        - </span><span style="color:#bf616a;">id</span><span>: </span><span style="color:#a3be8c;">unknown2
+</span><span>          </span><span style="color:#bf616a;">type</span><span>: </span><span style="color:#a3be8c;">u4
+</span><span>        - </span><span style="color:#bf616a;">id</span><span>: </span><span style="color:#a3be8c;">last_player_id
+</span><span>          </span><span style="color:#bf616a;">type</span><span>: </span><span style="color:#a3be8c;">u4
+</span><span>        - </span><span style="color:#bf616a;">id</span><span>: </span><span style="color:#a3be8c;">unknown3
+</span><span>          </span><span style="color:#bf616a;">size</span><span>: </span><span style="color:#d08770;">8
+</span><span>        - </span><span style="color:#bf616a;">id</span><span>: </span><span style="color:#a3be8c;">game_guid
+</span><span>          </span><span style="color:#bf616a;">size</span><span>: </span><span style="color:#d08770;">16
+</span><span>        - </span><span style="color:#bf616a;">id</span><span>: </span><span style="color:#a3be8c;">session_guid
+</span><span>          </span><span style="color:#bf616a;">size</span><span>: </span><span style="color:#d08770;">16
+</span><span>        - </span><span style="color:#bf616a;">id</span><span>: </span><span style="color:#a3be8c;">new_host_name
+</span><span>          </span><span style="color:#bf616a;">type</span><span>: </span><span style="color:#a3be8c;">str
+</span><span>          </span><span style="color:#bf616a;">size</span><span>: </span><span style="color:#d08770;">14
+</span><span>          </span><span style="color:#bf616a;">encoding</span><span>: </span><span style="color:#a3be8c;">UTF-16
+</span><span>        - </span><span style="color:#bf616a;">id</span><span>: </span><span style="color:#a3be8c;">pad
+</span><span>          </span><span style="color:#bf616a;">size</span><span>: </span><span style="color:#d08770;">18
+</span><span>        - </span><span style="color:#bf616a;">id</span><span>: </span><span style="color:#a3be8c;">new_host_id
+</span><span>          </span><span style="color:#bf616a;">type</span><span>: </span><span style="color:#a3be8c;">u4
+</span><span>        - </span><span style="color:#bf616a;">id</span><span>: </span><span style="color:#a3be8c;">pad2
+</span><span>          </span><span style="color:#bf616a;">size</span><span>: </span><span style="color:#d08770;">18
+</span><span>        - </span><span style="color:#bf616a;">id</span><span>: </span><span style="color:#a3be8c;">new_host_ip
+</span><span>          </span><span style="color:#bf616a;">size</span><span>: </span><span style="color:#d08770;">4
+</span><span>        - </span><span style="color:#bf616a;">id</span><span>: </span><span style="color:#a3be8c;">new_host_port
+</span><span>          </span><span style="color:#bf616a;">type</span><span>: </span><span style="color:#a3be8c;">u2be
+</span><span>        - </span><span style="color:#bf616a;">id</span><span>: </span><span style="color:#a3be8c;">new_host_guid
+</span><span>          </span><span style="color:#bf616a;">size</span><span>: </span><span style="color:#d08770;">16
+</span><span>        - </span><span style="color:#bf616a;">id</span><span>: </span><span style="color:#a3be8c;">last_player_id2
+</span><span>          </span><span style="color:#bf616a;">type</span><span>: </span><span style="color:#a3be8c;">u4
+</span><span>        - </span><span style="color:#bf616a;">id</span><span>: </span><span style="color:#a3be8c;">pad3
+</span><span>          </span><span style="color:#bf616a;">size-eos</span><span>: </span><span style="color:#d08770;">true
+</span><span>    </span><span style="color:#bf616a;">player_info</span><span>:
+</span><span>      </span><span style="color:#bf616a;">seq</span><span>:
+</span><span>        - </span><span style="color:#bf616a;">id</span><span>: </span><span style="color:#a3be8c;">name
+</span><span>          </span><span style="color:#bf616a;">type</span><span>: </span><span style="color:#a3be8c;">str
+</span><span>          </span><span style="color:#bf616a;">size</span><span>: </span><span style="color:#d08770;">32
+</span><span>          </span><span style="color:#bf616a;">encoding</span><span>: </span><span style="color:#a3be8c;">UTF-16
+</span><span>        - </span><span style="color:#bf616a;">id</span><span>: </span><span style="color:#a3be8c;">id
+</span><span>          </span><span style="color:#bf616a;">type</span><span>: </span><span style="color:#a3be8c;">u4
+</span><span>        - </span><span style="color:#bf616a;">id</span><span>: </span><span style="color:#a3be8c;">unknown
+</span><span>          </span><span style="color:#bf616a;">type</span><span>: </span><span style="color:#a3be8c;">u4
+</span><span>        - </span><span style="color:#bf616a;">id</span><span>: </span><span style="color:#a3be8c;">unknown2
+</span><span>          </span><span style="color:#bf616a;">type</span><span>: </span><span style="color:#a3be8c;">u4
+</span><span>        - </span><span style="color:#bf616a;">id</span><span>: </span><span style="color:#a3be8c;">unknown3
+</span><span>          </span><span style="color:#bf616a;">type</span><span>: </span><span style="color:#a3be8c;">u4
+</span><span>        - </span><span style="color:#bf616a;">id</span><span>: </span><span style="color:#a3be8c;">unknown4
+</span><span>          </span><span style="color:#bf616a;">type</span><span>: </span><span style="color:#a3be8c;">u4
+</span><span>        - </span><span style="color:#bf616a;">id</span><span>: </span><span style="color:#a3be8c;">flags
+</span><span>          </span><span style="color:#bf616a;">type</span><span>: </span><span style="color:#a3be8c;">u1
+</span><span>        - </span><span style="color:#bf616a;">id</span><span>: </span><span style="color:#a3be8c;">slot
+</span><span>          </span><span style="color:#bf616a;">type</span><span>: </span><span style="color:#a3be8c;">u1
+</span><span>        - </span><span style="color:#bf616a;">id</span><span>: </span><span style="color:#a3be8c;">ip
+</span><span>          </span><span style="color:#bf616a;">size</span><span>: </span><span style="color:#d08770;">4
+</span><span>        - </span><span style="color:#bf616a;">id</span><span>: </span><span style="color:#a3be8c;">port
+</span><span>          </span><span style="color:#bf616a;">type</span><span>: </span><span style="color:#a3be8c;">u2be
+</span><span>        - </span><span style="color:#bf616a;">id</span><span>: </span><span style="color:#a3be8c;">guid
+</span><span>          </span><span style="color:#bf616a;">size</span><span>: </span><span style="color:#d08770;">16
+</span><span>        - </span><span style="color:#bf616a;">id</span><span>: </span><span style="color:#a3be8c;">pad
+</span><span>          </span><span style="color:#bf616a;">size</span><span>: </span><span style="color:#d08770;">3
+</span><span>    </span><span style="color:#bf616a;">datagram</span><span>:
+</span><span>      </span><span style="color:#bf616a;">seq</span><span>:
+</span><span>        - </span><span style="color:#bf616a;">id</span><span>: </span><span style="color:#a3be8c;">cmd
+</span><span>          </span><span style="color:#bf616a;">type</span><span>: </span><span style="color:#a3be8c;">u1
+</span><span>        - </span><span style="color:#bf616a;">id</span><span>: </span><span style="color:#a3be8c;">value
+</span><span>          </span><span style="color:#bf616a;">size-eos</span><span>: </span><span style="color:#d08770;">true
+</span><span>        
+</span><span>    </span><span style="color:#bf616a;">session_desc</span><span>:
+</span><span>      </span><span style="color:#bf616a;">seq</span><span>:
+</span><span>        - </span><span style="color:#bf616a;">id</span><span>: </span><span style="color:#a3be8c;">game_version
+</span><span>          </span><span style="color:#bf616a;">type</span><span>: </span><span style="color:#a3be8c;">u4
+</span><span>        - </span><span style="color:#bf616a;">id</span><span>: </span><span style="color:#a3be8c;">session_guid
+</span><span>          </span><span style="color:#bf616a;">size</span><span>: </span><span style="color:#d08770;">16
+</span><span>        - </span><span style="color:#bf616a;">id</span><span>: </span><span style="color:#a3be8c;">game_guid
+</span><span>          </span><span style="color:#bf616a;">size</span><span>: </span><span style="color:#d08770;">16
+</span><span>        - </span><span style="color:#bf616a;">id</span><span>: </span><span style="color:#a3be8c;">max_players
+</span><span>          </span><span style="color:#bf616a;">type</span><span>: </span><span style="color:#a3be8c;">u4
+</span><span>        - </span><span style="color:#bf616a;">id</span><span>: </span><span style="color:#a3be8c;">current_players
+</span><span>          </span><span style="color:#bf616a;">type</span><span>: </span><span style="color:#a3be8c;">u4
+</span><span>        - </span><span style="color:#bf616a;">id</span><span>: </span><span style="color:#a3be8c;">unknown2
+</span><span>          </span><span style="color:#bf616a;">size</span><span>: </span><span style="color:#d08770;">16
+</span><span>        - </span><span style="color:#bf616a;">id</span><span>: </span><span style="color:#a3be8c;">session_flags
+</span><span>          </span><span style="color:#bf616a;">type</span><span>: </span><span style="color:#a3be8c;">u4
+</span><span>        - </span><span style="color:#bf616a;">id</span><span>: </span><span style="color:#a3be8c;">language_id
+</span><span>          </span><span style="color:#bf616a;">type</span><span>: </span><span style="color:#a3be8c;">u4
+</span><span>        - </span><span style="color:#bf616a;">id</span><span>: </span><span style="color:#a3be8c;">unknown4
+</span><span>          </span><span style="color:#bf616a;">type</span><span>: </span><span style="color:#a3be8c;">u4
+</span><span>        - </span><span style="color:#bf616a;">id</span><span>: </span><span style="color:#a3be8c;">unknown5
+</span><span>          </span><span style="color:#bf616a;">type</span><span>: </span><span style="color:#a3be8c;">u4
+</span><span>        - </span><span style="color:#bf616a;">id</span><span>: </span><span style="color:#a3be8c;">unknown6
+</span><span>          </span><span style="color:#bf616a;">type</span><span>: </span><span style="color:#a3be8c;">u4
+</span><span>        - </span><span style="color:#bf616a;">id</span><span>: </span><span style="color:#a3be8c;">port
+</span><span>          </span><span style="color:#bf616a;">type</span><span>: </span><span style="color:#a3be8c;">u2be
+</span><span>        - </span><span style="color:#bf616a;">id</span><span>: </span><span style="color:#a3be8c;">socket
+</span><span>          </span><span style="color:#bf616a;">type</span><span>: </span><span style="color:#a3be8c;">u4
+</span><span>        - </span><span style="color:#bf616a;">id</span><span>: </span><span style="color:#a3be8c;">ip
+</span><span>          </span><span style="color:#bf616a;">size</span><span>: </span><span style="color:#d08770;">4
+</span><span>        - </span><span style="color:#bf616a;">id</span><span>: </span><span style="color:#a3be8c;">padding
+</span><span>          </span><span style="color:#bf616a;">size</span><span>: </span><span style="color:#d08770;">10
+</span><span>        - </span><span style="color:#bf616a;">id</span><span>: </span><span style="color:#a3be8c;">session_name
+</span><span>          </span><span style="color:#bf616a;">type</span><span>: </span><span style="color:#a3be8c;">str
+</span><span>          </span><span style="color:#bf616a;">size</span><span>: </span><span style="color:#d08770;">64
+</span><span>          </span><span style="color:#bf616a;">encoding</span><span>: </span><span style="color:#a3be8c;">UTF-16
+</span><span>
+</span><span style="color:#bf616a;">enums</span><span>:
+</span><span>  </span><span style="color:#bf616a;">packet_type</span><span>:
+</span><span>    </span><span style="color:#d08770;">1</span><span>: </span><span style="color:#a3be8c;">add_player
+</span><span>    </span><span style="color:#d08770;">3</span><span>: </span><span style="color:#a3be8c;">datagram
+</span><span>    </span><span style="color:#d08770;">4</span><span>: </span><span style="color:#a3be8c;">chat
+</span><span>    </span><span style="color:#d08770;">5</span><span>: </span><span style="color:#a3be8c;">discover
+</span><span>    </span><span style="color:#d08770;">6</span><span>: </span><span style="color:#a3be8c;">session_info
+</span><span>    </span><span style="color:#d08770;">7</span><span>: </span><span style="color:#a3be8c;">request_join
+</span><span>    </span><span style="color:#d08770;">8</span><span>: </span><span style="color:#a3be8c;">confirm_join
+</span><span>    </span><span style="color:#d08770;">9</span><span>: </span><span style="color:#a3be8c;">destroy_player
+</span><span>    </span><span style="color:#d08770;">10</span><span>: </span><span style="color:#a3be8c;">leave_session
+</span><span>    </span><span style="color:#d08770;">11</span><span>: </span><span style="color:#a3be8c;">session_players
+</span><span>    </span><span style="color:#d08770;">12</span><span>: </span><span style="color:#a3be8c;">acknowledge
+</span><span>    </span><span style="color:#d08770;">15</span><span>: </span><span style="color:#a3be8c;">host_change
+</span><span>  </span><span style="color:#bf616a;">receiver_type</span><span>:
+</span><span>    </span><span style="color:#d08770;">0xFFFFFFFF</span><span>: </span><span style="color:#a3be8c;">broadcast
+</span><span>    </span><span style="color:#d08770;">0xFFFFFFFE</span><span>: </span><span style="color:#a3be8c;">host
+</span></code></pre>
+<p>And here's an example of each of the packets parsed by Kaitai and some comments about them.</p>
+<h3 id="add-player-packet">Add Player packet</h3>
+<p>Informs players that a new player joined the session.
+<div class="textCenter">
+  <a class="lightbox" href="img&#x2F;add_player_packet.png">
+    <img src="img&#x2F;add_player_packet.png" >
+  </a>
+  
+</div></p>
+<h3 id="datagram-packet">Datagram packet</h3>
+<p>A wrapper to in-game related packets that get redirected to the main executable for interpreting.
+<div class="textCenter">
+  <a class="lightbox" href="img&#x2F;datagram_packet.png">
+    <img src="img&#x2F;datagram_packet.png" >
+  </a>
+  
+</div></p>
+<h3 id="chat-packet">Chat packet</h3>
+<p>A chat message that can be directed at a player, at the host or broadcast.
+<div class="textCenter">
+  <a class="lightbox" href="img&#x2F;chat_packet.png">
+    <img src="img&#x2F;chat_packet.png" >
+  </a>
+  
+</div></p>
+<h3 id="discover-packet">Discover packet</h3>
+<p>Anounces that the player is looking for a session to join.
+<div class="textCenter">
+  <a class="lightbox" href="img&#x2F;discover_packet.png">
+    <img src="img&#x2F;discover_packet.png" >
+  </a>
+  
+</div></p>
+<h3 id="session-information-packet">Session Information packet</h3>
+<p>Basically contains the <em>SESSIONDESC</em> struct letting the player know about a possible session to join.
+<div class="textCenter">
+  <a class="lightbox" href="img&#x2F;session_info_packet.png">
+    <img src="img&#x2F;session_info_packet.png" >
+  </a>
+  
+</div></p>
+<h3 id="request-join-packet">Request Join packet</h3>
+<p>Used to request the host to join a session, also contains a password if needed.
+<div class="textCenter">
+  <a class="lightbox" href="img&#x2F;request_join_packet.png">
+    <img src="img&#x2F;request_join_packet.png" >
+  </a>
+  
+</div></p>
+<h3 id="confirm-join-packet">Confirm Join packet</h3>
+<p>Confirms that the player can join the session and gives the player information related to its status in the session.
+<div class="textCenter">
+  <a class="lightbox" href="img&#x2F;confirm_join_packet.png">
+    <img src="img&#x2F;confirm_join_packet.png" >
+  </a>
+  
+</div></p>
+<h3 id="destroy-player-packet">Destroy Player packet</h3>
+<p>Tells players in a session that a player left and should be removed from their list.
+<div class="textCenter">
+  <a class="lightbox" href="img&#x2F;destroy_player_packet.png">
+    <img src="img&#x2F;destroy_player_packet.png" >
+  </a>
+  
+</div></p>
+<h3 id="leave-session-packet">Leave Session packet</h3>
+<p>Used to request the host to leave a session.
+<div class="textCenter">
+  <a class="lightbox" href="img&#x2F;leave_session_packet.png">
+    <img src="img&#x2F;leave_session_packet.png" >
+  </a>
+  
+</div></p>
+<h3 id="session-players-packet">Session Players packet</h3>
+<p>Gives a newly joined player information of the other players in the session. It is basically an array of <em>PLAYERDESC</em> structs.
+<div class="textCenter">
+  <a class="lightbox" href="img&#x2F;session_players_packet.png">
+    <img src="img&#x2F;session_players_packet.png" >
+  </a>
+  
+</div></p>
+<h3 id="acknowledge-packet">Acknowledge packet</h3>
+<p>Acknowledges the reception of some packets like <em>Destroy Player</em> or <em>Session Players</em>.
+<div class="textCenter">
+  <a class="lightbox" href="img&#x2F;acknowledge_packet.png">
+    <img src="img&#x2F;acknowledge_packet.png" >
+  </a>
+  
+</div></p>
+<h3 id="host-change-packet">Host Change packet</h3>
+<p>Informs players in a session that the host has changed and gives information of the new host.
+<div class="textCenter">
+  <a class="lightbox" href="img&#x2F;host_change_packet.png">
+    <img src="img&#x2F;host_change_packet.png" >
+  </a>
+  
+</div></p>
+<h2 id="communication-flow">Communication flow</h2>
+<p>Finally, now that we know about the packets used by this protocol let's show some of the most common communication flows that can happen in a lobby.</p>
+<h3 id="joining-a-session">Joining a session</h3>
+<div class="textCenter">
+  <a class="lightbox" href="img&#x2F;populous3_flow_join_session.png">
+    <img src="img&#x2F;populous3_flow_join_session.png" >
+  </a>
+  
+</div><h3 id="leaving-a-session">Leaving a session</h3>
+<div class="textCenter">
+  <a class="lightbox" href="img&#x2F;populous3_flow_leave_session.png">
+    <img src="img&#x2F;populous3_flow_leave_session.png" >
+  </a>
+  
+</div><h3 id="host-leaving-a-session">Host leaving a session</h3>
+<div class="textCenter">
+  <a class="lightbox" href="img&#x2F;populous3_flow_host_change.png">
+    <img src="img&#x2F;populous3_flow_host_change.png" >
+  </a>
+  
+</div>
+<p>We now have a pretty good idea of how all the lobby related functionality works.</p>
+<p>That's it for now :). I will probably write another post about how to exploit some vulnerabilities I found so stay tuned!</p>
+
+
+<p class="tagsData">
+  
+</p>
+
+      </main>
+      <footer>
+          <hr>
+<div class=footContainer>
+  <div class="footLeft">
+      Built with <a target="_blank" rel="noopener noreferrer" href="https://www.getzola.org">Zola</a> using <a target="_blank" rel="noopener noreferrer" href="https://github.com/Speyll/anemone">anemone</a> theme &amp; <a target="_blank" rel="noopener noreferrer" href="https://github.com/Speyll/veqev">veqev</a> colors.<br>
+    </p>
+  </div>
+  
+  <div class="footRight">
+    <a class="icons__background" target="_blank" rel="noopener noreferrer" href="https://guas.ch/atom.xml" title="Subscribe via RSS for updates."><svg class="icons icons__background"><use href="https://guas.ch/icons.svg#rss"></use></svg></a>
+  </div>
+  
+</div>
+      </footer>
+    </div>
+</body>
+</html>

@@ -1,0 +1,226 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+<meta content="IE=edge" http-equiv="X-UA-Compatible" />
+<meta content="text/html; charset=UTF-8" http-equiv="content-type" />
+<meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no" />
+<meta name="robots" content="index, follow">
+
+
+
+
+
+
+
+
+
+
+<title>Vulnserver: Setting up and fuzzing</title>
+
+
+
+<meta name="title" content="Vulnserver: Setting up and fuzzing">
+
+
+
+<meta property="og:type" content="website">
+<meta property="og:url" content="https://guas.ch/blog/vulnserver1-fuzzing/">
+
+<meta property="og:site_name" content="">
+
+
+<meta property="og:title" content="Vulnserver: Setting up and fuzzing">
+
+
+
+
+
+<meta property="twitter:card" content="summary_large_image">
+<meta property="twitter:url" content="https://guas.ch/blog/vulnserver1-fuzzing/">
+
+<meta property="twitter:title" content="Vulnserver: Setting up and fuzzing">
+
+
+
+
+<link rel="canonical" href="https://guas.ch/blog/vulnserver1-fuzzing/">
+
+
+
+
+<link rel="alternate" type="application/atom+xml" title="RSS" href="https://guas.ch/atom.xml"> 
+
+
+
+<link rel="stylesheet" href="https://guas.ch/css/style.css" />
+
+<script defer>
+    const setTheme = (theme) => {
+        document.documentElement.className = theme;
+        localStorage.setItem('theme', theme);
+    }
+
+    const hasCodeRun = localStorage.getItem('hasCodeRun');
+
+    if (!hasCodeRun) {
+        const defaultTheme = "light";
+        setTheme(defaultTheme);
+        localStorage.setItem('hasCodeRun', 'true');
+    }
+
+    const getTheme = () => {
+        const theme = localStorage.getItem('theme');
+        if (theme) {
+            setTheme(theme);
+        }
+    }
+
+    getTheme();
+
+</script>
+</head>
+<body>
+    <div class="wrapper">
+      <header>
+          
+
+  
+
+
+  <nav class="navBar">
+    
+      <a href="&#x2F;" class="">
+        
+        &#x2F;whoami&#x2F;
+      </a>
+    
+      <a href="&#x2F;blog" class="">
+        
+        &#x2F;blog&#x2F;
+      </a>
+    
+
+  <div class="themeSwitch">
+    
+    <button class="themeButton light" onclick="setTheme('light')" title="Light mode"><svg class="icons icons__background"> <use href="https://guas.ch/icons.svg#lightMode"></use></svg></button>
+    <button class="themeButton dark" onclick="setTheme('dark')" title="Dark mode"><svg class="icons icons__background"><use href="https://guas.ch/icons.svg#darkMode"></use></svg></button>
+
+    
+  </div>
+</nav>
+
+
+      </header>
+      <main>
+          
+<div><a href="..">..</a>/<span class="metaData">vulnserver1-fuzzing</span></div>
+<time datetime="2019-08-01">Published on: <span class="metaData">2019-08-01</span></time>
+
+<h1>Vulnserver: Setting up and fuzzing</h1>
+
+
+
+<p>This is going to be the first post in a series on exploiting Vulnserver, here we will talk about what software do we need to get started and later we will find some crashes in Vulnserver by using a fuzzer.<!--more--></p>
+<h2 id="setting-up">Setting up</h2>
+<p>The different software we will need in this journey is the following:</p>
+<ul>
+<li>Windows XP SP3 VM (Victim)</li>
+<li>Kali Linux VM (Attacker)</li>
+<li>Spike (Fuzzer)</li>
+<li><a href="https://github.com/stephenbradshaw/vulnserver">Vulnserver</a> (Vulnerable application)</li>
+<li><a href="http://www.immunitysec.com/products/debugger/index.html">Immunity Debugger</a> with <a href="https://github.com/corelan/mona">mona.py</a></li>
+</ul>
+<p>We can obtain Vulnserver from Github in the link above and run it in our Windows VM. To do so we just need to have the executable provided in the same folder as the dll and double click it.</p>
+<div class="textCenter">
+  <a class="lightbox" href="img&#x2F;vulnserver1.PNG">
+    <img src="img&#x2F;vulnserver1.PNG" >
+  </a>
+  
+</div>
+<p>Immunity Debugger is going to be our debugger in Windows to analyze the crashes and we will use the mona.py plugin developed by Corelan to help us in the process of exploitation, both can be obtained from the links above.</p>
+<div class="textCenter">
+  <a class="lightbox" href="img&#x2F;immunitydbg1.PNG">
+    <img src="img&#x2F;immunitydbg1.PNG" >
+  </a>
+  
+</div>
+<p>And we can obtain Spike from the repositories provided by Kali by simple running a <strong>apt install spike</strong> in the terminal.</p>
+<h2 id="initial-reconnaissance">Initial reconnaissance</h2>
+<p>Before we can start fuzzing we need some information on how our victim expects to receive the data. So first of all let's run Vulnserver and try to communicate with it, once we have it running we can test it by connecting to it using netcat from our Kali VM. We just need to provide it the ip of our Windows VM and the default port is going to be 9999.</p>
+<div class="textCenter">
+  <a class="lightbox" href="img&#x2F;vulnserver2.PNG">
+    <img src="img&#x2F;vulnserver2.PNG" >
+  </a>
+  
+</div>
+<p>As you can see in my case the ip of the Windows VM is 192.168.1.46, once connected we are greeted with a welcome message. If we run the HELP command indicated we obtain all the possible commands accepted and if we give it an invalid command we are just answered with UNKNOWN COMMAND. Now that we've gathered enough information on it we can start the fuzzing process.</p>
+<h2 id="fuzzing-vulnserver">Fuzzing Vulnserver</h2>
+<p>As I said we are going to use Spike to fuzz the victim but I lied about Spike being a fuzzer it is actually a fuzzer creatin kit so we will need to do some simple coding to start fuzzing. If you want to learn a bit more about Spike Infosecinstitue has a good introduction on it in <a href="https://resources.infosecinstitute.com/intro-to-fuzzing/">this link</a>.</p>
+<p>To create our fuzzer we will have to write a .spk file, which are called spikes, for each command. In it we basically will tell Spike to read the welcome message and then send one of the valid commands we saw earlier followed by some random data generated by the fuzzer. In the following code we can see an example of the file to fuzz the TRUN command and we will create similar files for each command.</p>
+<pre data-lang="c" style="background-color:#2b303b;color:#c0c5ce;" class="language-c "><code class="language-c" data-lang="c"><span style="color:#bf616a;">s_readline</span><span>(); </span><span style="color:#65737e;">// Read the welcome message
+</span><span style="color:#bf616a;">s_string</span><span>(&quot;</span><span style="color:#a3be8c;">TRUN </span><span>&quot;); </span><span style="color:#65737e;">// Send command followed by a space
+</span><span style="color:#bf616a;">s_string_variable</span><span>(&quot;</span><span style="color:#a3be8c;">ANYTHING CAN GO HERE</span><span>&quot;); </span><span style="color:#65737e;">// Send random data generated by the fuzzer
+</span></code></pre>
+<p>The string in <em>s_string_variable()</em> is the one that's going to change every execution in hopes of finding a crash. To test our spike we are going to use the tool provided by Spike called <strong>generic_send_tcp</strong>, to run it we have to provide it with an ip address, a port, the spike file we created and follow it with two 0s separated by a space. Now, make sure you have Vulnserver running on your Windows VM and let's run the fuzzer.</p>
+<div class="textCenter">
+  <a class="lightbox" href="img&#x2F;spike1.PNG">
+    <img src="img&#x2F;spike1.PNG" >
+  </a>
+  
+</div>
+<p>We can see how it seems to be sending different data and after a while it stops receiving the welcome message from Vulnserver. If we look at vulnserver we will be greeted with this lovely message.</p>
+<div class="textCenter">
+  <a class="lightbox" href="img&#x2F;vulnserver3.PNG">
+    <img src="img&#x2F;vulnserver3.PNG" >
+  </a>
+  
+</div>
+<p>This is really nice since it means that we found a string that caused a crash but we have no clue what string it was so we can not reproduce it. To be able to obtain said string we have different methods, in my case, I'm going to run Vulnserver with Immunity Debugger to be able to check the state once the program crashes but you can also use Wireshark to analyze the packets send. We execute Immunity Debugger and open Vulnserver by pressing F3 and selecting it, we press F9 to continue execution, since it starts on a paussed state, and now we can fuzz it again and check the status once it crashes.</p>
+<div class="textCenter">
+  <a class="lightbox" href="img&#x2F;immunitydbg2.PNG">
+    <img src="img&#x2F;immunitydbg2.PNG" >
+  </a>
+  
+</div><div class="textCenter">
+  <a class="lightbox" href="img&#x2F;immunitydbg3.PNG">
+    <img src="img&#x2F;immunitydbg3.PNG" >
+  </a>
+  
+</div>
+<p>In the screenshots we can see how the program crashed when trying to executed the instruction in the adress 41414141, which is <strong>A</strong> in hexadecimal, meaning we overwrote EIP with As. And if we look at the Registers window we can see how EAX is pointing at an ASCII string which is the command that caused the crash.</p>
+<p>So we found our crash for the TRUN command, if we repeat the fuzzing steps for each command we are going to find crashes for the following commands:</p>
+<ul>
+<li>TRUN</li>
+<li>GMON</li>
+<li>GTER</li>
+<li>HTER</li>
+<li>KSTET</li>
+<li>LTER</li>
+</ul>
+<p>In the next posts we are going to talk about different ways to exploit each of them and we will see how each one needs a different approach.</p>
+<p>Goodbye!</p>
+
+
+<p class="tagsData">
+  
+</p>
+
+      </main>
+      <footer>
+          <hr>
+<div class=footContainer>
+  <div class="footLeft">
+      Built with <a target="_blank" rel="noopener noreferrer" href="https://www.getzola.org">Zola</a> using <a target="_blank" rel="noopener noreferrer" href="https://github.com/Speyll/anemone">anemone</a> theme &amp; <a target="_blank" rel="noopener noreferrer" href="https://github.com/Speyll/veqev">veqev</a> colors.<br>
+    </p>
+  </div>
+  
+  <div class="footRight">
+    <a class="icons__background" target="_blank" rel="noopener noreferrer" href="https://guas.ch/atom.xml" title="Subscribe via RSS for updates."><svg class="icons icons__background"><use href="https://guas.ch/icons.svg#rss"></use></svg></a>
+  </div>
+  
+</div>
+      </footer>
+    </div>
+</body>
+</html>

