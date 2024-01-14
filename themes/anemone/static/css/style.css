@@ -113,8 +113,8 @@ a:hover {
   color: var(--bgColor)
 }
 
-a.chocolat-image:focus,
-a.chocolat-image:hover {
+a.lightbox:focus,
+a.lightbox:hover {
   background-color: transparent;
   color:transparent;
 }
