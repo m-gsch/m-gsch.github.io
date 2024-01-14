@@ -6,8 +6,8 @@ title = "__gsch"
 I am a **security engineer** interested in **vulnerability research** and **low-level** topics.
 
 In this blog you can expect posts on:
-- 🧩 Reverse Engineering
-- 💣 Binary Exploitation
+- 🧩 Reverse engineering
+- 💣 Binary exploitation
 - 🌀 Fuzzing
 - 🦀 Rust programming
 
