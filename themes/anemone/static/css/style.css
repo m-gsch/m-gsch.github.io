@@ -27,7 +27,7 @@
 :root.dark {
   --bgColor: #222529;
   --fgColor: #D6D6D6;
-  --metaColor: #78B6AD;
+  --metaColor: #5690AF;
   --headColor: #;
   --linkColor: #DBD5BC;
   --hovColor: #E2AEA2;
@@ -111,6 +111,12 @@ a:focus,
 a:hover {
   background-color: var(--linkColor);
   color: var(--bgColor)
+}
+
+a.chocolat-image:focus,
+a.chocolat-image:hover {
+  background-color: transparent;
+  color:transparent;
 }
 
 ul {

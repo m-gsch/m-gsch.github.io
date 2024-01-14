@@ -1,4 +1,6 @@
 <div {% if class %}class="{{class}}"{% endif %}>
-  <img src="{{id}}" {% if alt %}alt="{{alt}}"{% endif %}>
+  <a class="chocolat-image" href="{{id}}">
+    <img src="{{id}}" {% if alt %}alt="{{alt}}"{% endif %}>
+  </a>
   {% if caption %}<div class="caption">{{caption}}</div>{% endif %}
 </div>
